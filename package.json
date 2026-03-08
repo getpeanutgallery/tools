@@ -9,6 +9,6 @@
     "test": "node --test test/**/*.test.js"
   },
   "dependencies": {
-    "ai-providers": "file:../ai-providers"
+    "ai-providers": "git+ssh://git@github.com/getpeanutgallery/ai-providers.git#main"
   }
 }
