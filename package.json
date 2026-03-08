@@ -1,0 +1,14 @@
+{
+  "name": "tools",
+  "version": "1.0.0",
+  "description": "Tools for emotion analysis",
+  "main": "emotion-lenses-tool.cjs",
+  "type": "commonjs",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/**/*.test.js"
+  },
+  "dependencies": {
+    "ai-providers": "file:../ai-providers"
+  }
+}
