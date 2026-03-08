@@ -110,20 +110,20 @@ const personaLoader = {
 };
 
 /**
- * Get AI provider - reads from env, uses ai-providers package if available
+ * Get AI provider from YAML config (source of truth)
  */
-async function getAIProvider() {
-  // Try to use ai-providers package if available
+async function getAIProvider(config) {
   try {
     const aiProvider = require('ai-providers/ai-provider-interface.js');
-    const provider = aiProvider.getProviderFromEnv();
+    const provider = typeof aiProvider.getProviderFromConfig === 'function'
+      ? aiProvider.getProviderFromConfig(config)
+      : aiProvider.loadProvider(config?.ai?.provider || 'openrouter');
     const apiKey = process.env.AI_API_KEY;
     if (!apiKey) {
       throw new Error('AI_API_KEY is required');
     }
     return { provider, apiKey };
   } catch (e) {
-    // ai-providers not available or error - throw
     throw new Error(`AI provider unavailable: ${e.message}`);
   }
 }
@@ -289,7 +289,7 @@ function parseResponse(responseContent, previousState, lenses) {
  * @returns {Promise<Object>} Analysis result with prompt, state, usage
  */
 async function analyze(input) {
-  const { toolVariables, videoContext, dialogueContext, musicContext, previousState } = input;
+  const { toolVariables, videoContext, dialogueContext, musicContext, previousState, config } = input;
 
   // Validate
   const validation = validateVariables(toolVariables);
@@ -312,9 +312,20 @@ async function analyze(input) {
     previousState
   });
 
-  // Get AI provider
-  const { provider, apiKey } = await getAIProvider();
-  const model = toolVariables.variables.model || process.env.AI_MODEL || 'default';
+  // Get AI provider and model from YAML config
+  const { provider, apiKey } = await getAIProvider(config);
+  const model = config?.ai?.video?.model;
+  if (!model) {
+    throw new Error('EmotionLensesTool: config.ai.video.model is required');
+  }
+
+  // Legacy compatibility: tool_variables.variables.model must match YAML model if present
+  const legacyModel = toolVariables?.variables?.model;
+  if (legacyModel && legacyModel !== model) {
+    throw new Error(
+      `EmotionLensesTool: tool_variables.variables.model (${legacyModel}) does not match config.ai.video.model (${model})`
+    );
+  }
 
   // Call AI
   const response = await provider.complete({

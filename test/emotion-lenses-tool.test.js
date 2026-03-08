@@ -14,7 +14,7 @@ function mockModule(modulePath, mockExports) {
 
 // Mock AI provider
 const mockAIProvider = {
-  getProviderFromEnv: () => ({
+  getProviderFromConfig: () => ({
     complete: async (options) => ({
       content: JSON.stringify({
         summary: 'Test chunk analysis',
@@ -28,7 +28,10 @@ const mockAIProvider = {
       }),
       usage: { input: 150, output: 100 }
     })
-  })
+  }),
+  getProviderFromEnv: () => {
+    throw new Error('getProviderFromEnv should not be used');
+  }
 };
 
 // Set up mock before requiring tool
@@ -234,7 +237,8 @@ test('Emotion Lenses Tool', async (t) => {
         },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
-        previousState: { summary: '', emotions: {} }
+        previousState: { summary: '', emotions: {} },
+        config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
       };
 
       const result = await emotionLensesTool.analyze(input);
@@ -258,7 +262,8 @@ test('Emotion Lenses Tool', async (t) => {
         videoContext: { duration: 5 },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
-        previousState: { summary: '' }
+        previousState: { summary: '' },
+        config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
       };
 
       const result = await emotionLensesTool.analyze(input);
@@ -282,7 +287,8 @@ test('Emotion Lenses Tool', async (t) => {
         videoContext: { duration: 5 },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
-        previousState: { summary: '' }
+        previousState: { summary: '' },
+        config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
       };
       await assert.rejects(emotionLensesTool.analyze(input), /Failed to load persona configuration/);
     });
@@ -297,7 +303,8 @@ test('Emotion Lenses Tool', async (t) => {
         videoContext: { duration: 5 },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
-        previousState: { summary: 'Previous chunk' }
+        previousState: { summary: 'Previous chunk' },
+        config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
       };
       const result = await emotionLensesTool.analyze(prevInput);
       assert.strictEqual(result.state.previousSummary, 'Previous chunk');
