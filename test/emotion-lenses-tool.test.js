@@ -12,22 +12,27 @@ function mockModule(modulePath, mockExports) {
   require.cache[absolutePath] = { exports: mockExports, loaded: true, id: absolutePath, filename: absolutePath };
 }
 
+let lastCompleteArgs = null;
+
 // Mock AI provider
 const mockAIProvider = {
   getProviderFromConfig: () => ({
-    complete: async (options) => ({
-      content: JSON.stringify({
-        summary: 'Test chunk analysis',
-        emotions: {
-          patience: { score: 7, reasoning: 'Test reasoning' },
-          boredom: { score: 3, reasoning: 'Test reasoning' },
-          excitement: { score: 6, reasoning: 'Test reasoning' }
-        },
-        dominant_emotion: 'patience',
-        confidence: 0.85
-      }),
-      usage: { input: 150, output: 100 }
-    })
+    complete: async (args) => {
+      lastCompleteArgs = args;
+      return {
+        content: JSON.stringify({
+          summary: 'Test chunk analysis',
+          emotions: {
+            patience: { score: 7, reasoning: 'Test reasoning' },
+            boredom: { score: 3, reasoning: 'Test reasoning' },
+            excitement: { score: 6, reasoning: 'Test reasoning' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.85
+        }),
+        usage: { input: 150, output: 100 }
+      };
+    }
   }),
   getProviderFromEnv: () => {
     throw new Error('getProviderFromEnv should not be used');
@@ -251,6 +256,48 @@ test('Emotion Lenses Tool', async (t) => {
       assert.strictEqual(result.state.emotions.patience.score, 7);
       assert.strictEqual(result.usage.input, 150);
       assert.strictEqual(result.usage.output, 100);
+    });
+
+    tNested.test('forwards config.ai.video.params into provider options', async () => {
+      lastCompleteArgs = null;
+
+      const input = {
+        toolVariables: {
+          soulPath,
+          goalPath,
+          variables: { lenses: ['patience'] }
+        },
+        videoContext: {
+          chunkPath: '/tmp/test.mp4',
+          chunkIndex: 0,
+          startTime: 0,
+          endTime: 8,
+          duration: 8
+        },
+        dialogueContext: { segments: [] },
+        musicContext: { segments: [] },
+        previousState: { summary: '', emotions: {} },
+        config: {
+          ai: {
+            provider: 'openrouter',
+            video: {
+              model: 'yaml-video-model',
+              params: {
+                temperature: 0.95,
+                maxTokens: 222,
+                topP: 0.2
+              }
+            }
+          }
+        }
+      };
+
+      await emotionLensesTool.analyze(input);
+
+      assert.ok(lastCompleteArgs);
+      assert.strictEqual(lastCompleteArgs.options.temperature, 0.95);
+      assert.strictEqual(lastCompleteArgs.options.maxTokens, 222);
+      assert.strictEqual(lastCompleteArgs.options.topP, 0.2);
     });
 
     tNested.test('includes raw response when debug.captureRaw is true', async () => {

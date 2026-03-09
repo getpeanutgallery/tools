@@ -327,6 +327,14 @@ async function analyze(input) {
     );
   }
 
+  const adapterParams = config?.ai?.video?.params;
+  const forwardedParams = adapterParams
+    && typeof adapterParams === 'object'
+    && adapterParams !== null
+    && !Array.isArray(adapterParams)
+    ? adapterParams
+    : {};
+
   // Call AI
   const response = await provider.complete({
     prompt,
@@ -334,7 +342,8 @@ async function analyze(input) {
     apiKey,
     options: {
       temperature: 0.3,
-      maxTokens: 1024
+      maxTokens: 1024,
+      ...forwardedParams
     }
   });
 
