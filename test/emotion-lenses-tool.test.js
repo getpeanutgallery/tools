@@ -246,10 +246,41 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok('prompt' in result);
       assert.ok('state' in result);
       assert.ok('usage' in result);
+      assert.ok(!('rawResponse' in result));
       assert.strictEqual(result.state.summary, 'Test chunk analysis');
       assert.strictEqual(result.state.emotions.patience.score, 7);
       assert.strictEqual(result.usage.input, 150);
       assert.strictEqual(result.usage.output, 100);
+    });
+
+    tNested.test('includes raw response when debug.captureRaw is true', async () => {
+      const input = {
+        toolVariables: {
+          soulPath,
+          goalPath,
+          variables: { lenses: ['patience', 'boredom', 'excitement'] }
+        },
+        videoContext: {
+          chunkPath: '/tmp/test.mp4',
+          chunkIndex: 0,
+          startTime: 0,
+          endTime: 8,
+          duration: 8
+        },
+        dialogueContext: { segments: [] },
+        musicContext: { segments: [] },
+        previousState: { summary: '', emotions: {} },
+        config: {
+          ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } },
+          debug: { captureRaw: true }
+        }
+      };
+
+      const result = await emotionLensesTool.analyze(input);
+
+      assert.ok('rawResponse' in result);
+      assert.strictEqual(typeof result.rawResponse, 'string');
+      assert.ok(result.rawResponse.includes('Test chunk analysis'));
     });
 
     tNested.test('prompt includes persona content', async () => {

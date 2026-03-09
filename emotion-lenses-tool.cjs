@@ -341,11 +341,17 @@ async function analyze(input) {
   // Parse response
   const state = parseResponse(response.content, previousState, toolVariables.variables.lenses);
 
-  return {
+  const result = {
     prompt,
     state,
     usage: response.usage
   };
+
+  if (config?.debug?.captureRaw) {
+    result.rawResponse = response.content;
+  }
+
+  return result;
 }
 
 module.exports = {
