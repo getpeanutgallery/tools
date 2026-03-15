@@ -2,10 +2,8 @@ const path = require('path');
 const assert = require('node:assert');
 const test = require('node:test');
 
-// Set fake API key for tests
 process.env.AI_API_KEY = 'test-api-key';
 
-// Helper to mock a module
 function mockModule(modulePath, mockExports) {
   const absolutePath = require.resolve(modulePath, { paths: [__dirname] });
   if (require.cache[absolutePath]) delete require.cache[absolutePath];
@@ -13,8 +11,6 @@ function mockModule(modulePath, mockExports) {
 }
 
 let lastCompleteArgs = null;
-
-// Mock AI provider
 const mockAIProvider = {
   getProviderFromConfig: () => ({
     complete: async (args) => {
@@ -39,19 +35,21 @@ const mockAIProvider = {
   }
 };
 
-// Set up mock before requiring tool
 mockModule('ai-providers/ai-provider-interface.js', mockAIProvider);
 
 const emotionLensesTool = require('../emotion-lenses-tool.cjs');
 
-// Fixture paths
 const fixturesDir = path.join(__dirname, 'fixtures');
 const soulPath = path.join(fixturesDir, 'sample-soul.md');
 const goalPath = path.join(fixturesDir, 'sample-goal.md');
 
 test('Emotion Lenses Tool', async (t) => {
-  t.test('validateVariables', (tNested) => {
-    tNested.test('returns valid for correct input', () => {
+  t.beforeEach(() => {
+    lastCompleteArgs = null;
+  });
+
+  await t.test('validateVariables', async (tNested) => {
+    await tNested.test('returns valid for correct input', () => {
       const toolVariables = {
         soulPath,
         goalPath,
@@ -62,13 +60,13 @@ test('Emotion Lenses Tool', async (t) => {
       assert.strictEqual(result.error, undefined);
     });
 
-    tNested.test('returns invalid when toolVariables is missing', () => {
+    await tNested.test('returns invalid when toolVariables is missing', () => {
       const result = emotionLensesTool.validateVariables(null);
       assert.strictEqual(result.valid, false);
       assert.ok(result.error.includes('required'));
     });
 
-    tNested.test('returns invalid when soulPath is missing', () => {
+    await tNested.test('returns invalid when soulPath is missing', () => {
       const toolVariables = {
         goalPath,
         variables: { lenses: ['patience'] }
@@ -78,7 +76,7 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(result.error.includes('soulPath'));
     });
 
-    tNested.test('returns invalid when goalPath is missing', () => {
+    await tNested.test('returns invalid when goalPath is missing', () => {
       const toolVariables = {
         soulPath,
         variables: { lenses: ['patience'] }
@@ -88,7 +86,7 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(result.error.includes('goalPath'));
     });
 
-    tNested.test('returns invalid when lenses is not an array', () => {
+    await tNested.test('returns invalid when lenses is not an array', () => {
       const toolVariables = {
         soulPath,
         goalPath,
@@ -100,69 +98,103 @@ test('Emotion Lenses Tool', async (t) => {
     });
   });
 
-  t.test('buildPrompt', (tNested) => {
-    tNested.test('builds prompt with all sections', () => {
+  await t.test('prompt and validator helpers', async (tNested) => {
+    await tNested.test('builds strict prompt with all sections', () => {
       const personaConfig = {
-        soul: { 'Identity': 'Test Persona', 'Core Truth': 'Test truth' },
+        soul: { Identity: 'Test Persona', 'Core Truth': 'Test truth' },
         goal: { 'Primary Objective': 'Test goal' },
         tools: {}
       };
       const options = {
         lenses: ['patience', 'boredom'],
         videoContext: { duration: 8, frames: [] },
-        dialogueContext: { segments: [] },
-        musicContext: { segments: [] },
-        previousState: { summary: '' }
+        dialogueContext: { segments: [{ start: 0, end: 5, speaker: 'Speaker 1', text: 'Hello' }] },
+        musicContext: { segments: [{ start: 0, end: 5, type: 'music', mood: 'tense', intensity: 6 }] },
+        previousState: { summary: 'Previous chunk summary' }
       };
       const prompt = emotionLensesTool.buildPrompt(personaConfig, options);
       assert.ok(prompt.includes('# PERSONA'));
       assert.ok(prompt.includes('# EVALUATION GOAL'));
       assert.ok(prompt.includes('# EMOTION LENSES TO TRACK'));
-      assert.ok(prompt.includes('patience'));
-      assert.ok(prompt.includes('boredom'));
       assert.ok(prompt.includes('# CONTEXT'));
       assert.ok(prompt.includes('# INSTRUCTIONS'));
-    });
-
-    tNested.test('includes previous state in prompt', () => {
-      const personaConfig = { soul: {}, goal: {}, tools: {} };
-      const options = {
-        lenses: ['patience'],
-        previousState: { summary: 'Previous chunk summary' }
-      };
-      const prompt = emotionLensesTool.buildPrompt(personaConfig, options);
-      assert.ok(prompt.includes('Previous Summary'));
+      assert.ok(prompt.includes('Return JSON only.'));
+      assert.ok(prompt.includes('dominant_emotion must match one of the configured lens names'));
       assert.ok(prompt.includes('Previous chunk summary'));
-    });
-
-    tNested.test('includes dialogue context in prompt', () => {
-      const personaConfig = { soul: {}, goal: {}, tools: {} };
-      const options = {
-        lenses: ['patience'],
-        dialogueContext: {
-          segments: [{ start: 0, end: 5, speaker: 'Speaker 1', text: 'Hello' }]
-        }
-      };
-      const prompt = emotionLensesTool.buildPrompt(personaConfig, options);
-      assert.ok(prompt.includes('## Dialogue'));
       assert.ok(prompt.includes('Speaker 1'));
-      assert.ok(prompt.includes('Hello'));
+      assert.ok(prompt.includes('tense'));
     });
 
-    tNested.test('includes video context', () => {
-      const personaConfig = { soul: {}, goal: {}, tools: {} };
-      const options = {
-        lenses: ['patience'],
-        videoContext: { duration: 10, frames: [1, 2, 3] }
-      };
-      const prompt = emotionLensesTool.buildPrompt(personaConfig, options);
-      assert.ok(prompt.includes('Duration: 10s'));
-      assert.ok(prompt.includes('Frames: 3'));
+    await tNested.test('buildBasePromptFromInput loads persona content', () => {
+      const prompt = emotionLensesTool.buildBasePromptFromInput({
+        toolVariables: {
+          soulPath,
+          goalPath,
+          variables: { lenses: ['patience', 'boredom'] }
+        },
+        videoContext: { duration: 8, frames: [] },
+        dialogueContext: { segments: [] },
+        musicContext: { segments: [] },
+        previousState: { summary: '' }
+      });
+
+      assert.ok(prompt.includes('Test Persona'));
+      assert.ok(prompt.includes('Core Truth'));
+      assert.ok(prompt.includes('Primary Objective'));
+    });
+
+    await tNested.test('builds a lane-specific validator contract', () => {
+      const contract = emotionLensesTool.buildEmotionAnalysisValidatorToolContract({
+        lenses: ['patience', 'boredom']
+      });
+
+      assert.strictEqual(contract.name, 'validate_emotion_analysis_json');
+      assert.strictEqual(contract.argumentKey, 'emotionAnalysis');
+      assert.strictEqual(contract.canonicalEnvelope.tool, 'validate_emotion_analysis_json');
+      assert.ok(contract.canonicalEnvelope.emotionAnalysis.emotions.patience);
+      assert.ok(contract.canonicalEnvelope.emotionAnalysis.emotions.boredom);
+    });
+
+    await tNested.test('validates a correct candidate artifact', () => {
+      const result = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Steady and focused.',
+          emotions: {
+            patience: { score: 8, reasoning: 'Measured delivery.' },
+            boredom: { score: 2, reasoning: 'Momentum stays intact.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.9
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
+      assert.ok(result.valid);
+      assert.strictEqual(result.normalizedValue.summary, 'Steady and focused.');
+    });
+
+    await tNested.test('rejects missing required lens entries', () => {
+      const result = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Incomplete payload.',
+          emotions: {
+            patience: { score: 8, reasoning: 'Present.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.9
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
+      assert.ok(!result.valid);
+      assert.ok(result.summary.includes('boredom'));
     });
   });
 
-  t.test('parseResponse', (tNested) => {
-    tNested.test('parses valid JSON response', () => {
+  await t.test('parseResponse', async (tNested) => {
+    await tNested.test('parses valid JSON response', () => {
       const responseContent = JSON.stringify({
         summary: 'Test summary',
         emotions: {
@@ -172,61 +204,32 @@ test('Emotion Lenses Tool', async (t) => {
         dominant_emotion: 'patience',
         confidence: 0.9
       });
-      const state = emotionLensesTool.parseResponse(responseContent, {}, ['patience', 'boredom']);
+      const state = emotionLensesTool.parseResponse(responseContent, { summary: 'Previous summary' }, ['patience', 'boredom']);
       assert.strictEqual(state.summary, 'Test summary');
       assert.strictEqual(state.emotions.patience.score, 8);
       assert.strictEqual(state.emotions.boredom.score, 2);
       assert.strictEqual(state.dominant_emotion, 'patience');
       assert.strictEqual(state.confidence, 0.9);
-    });
-
-    tNested.test('parses JSON from markdown code block', () => {
-      const responseContent = '```json\n' + JSON.stringify({
-        summary: 'Test summary',
-        emotions: {
-          patience: { score: 7, reasoning: 'Test' }
-        }
-      }) + '\n```';
-      const state = emotionLensesTool.parseResponse(responseContent, {}, ['patience']);
-      assert.strictEqual(state.summary, 'Test summary');
-      assert.strictEqual(state.emotions.patience.score, 7);
-    });
-
-    tNested.test('uses fallback for invalid JSON', () => {
-      const responseContent = 'Invalid response';
-      const state = emotionLensesTool.parseResponse(responseContent, {}, ['patience', 'boredom']);
-      assert.strictEqual(state.summary, 'Analysis completed');
-      assert.strictEqual(state.emotions.patience.score, 5);
-      assert.strictEqual(state.emotions.boredom.score, 5);
-    });
-
-    tNested.test('includes previous summary in state', () => {
-      const responseContent = JSON.stringify({
-        summary: 'New summary',
-        emotions: {}
-      });
-      const previousState = { summary: 'Previous summary' };
-      const state = emotionLensesTool.parseResponse(responseContent, previousState, []);
       assert.strictEqual(state.previousSummary, 'Previous summary');
     });
 
-    tNested.test('handles missing emotion fields', () => {
-      const responseContent = JSON.stringify({
-        summary: 'Partial response',
-        emotions: {
-          patience: { score: 5 }
-        }
-      });
-      const state = emotionLensesTool.parseResponse(responseContent, {}, ['patience', 'boredom']);
-      assert.strictEqual(state.emotions.patience.score, 5);
-      assert.strictEqual(state.emotions.patience.reasoning, '');
-      assert.strictEqual(state.emotions.boredom.score, 5);
-      assert.strictEqual(state.emotions.boredom.reasoning, 'Missing from response');
+    await tNested.test('throws structured error for invalid JSON', () => {
+      assert.throws(
+        () => emotionLensesTool.parseResponse('Invalid response', {}, ['patience']),
+        /Response was not valid JSON/
+      );
+    });
+
+    await tNested.test('throws structured error for invalid schema', () => {
+      assert.throws(
+        () => emotionLensesTool.parseResponse(JSON.stringify({ summary: 'oops', emotions: {}, dominant_emotion: 'wrong', confidence: 2 }), {}, ['patience']),
+        /Emotion JSON validation failed/
+      );
     });
   });
 
-  t.test('analyze (integration)', (tNested) => {
-    tNested.test('loads persona config and calls AI provider', async () => {
+  await t.test('analyze', async (tNested) => {
+    await tNested.test('loads persona config and returns structured result', async () => {
       const input = {
         toolVariables: {
           soulPath,
@@ -238,7 +241,8 @@ test('Emotion Lenses Tool', async (t) => {
           chunkIndex: 0,
           startTime: 0,
           endTime: 8,
-          duration: 8
+          duration: 8,
+          frames: []
         },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
@@ -251,29 +255,23 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok('prompt' in result);
       assert.ok('state' in result);
       assert.ok('usage' in result);
-      assert.ok(!('rawResponse' in result));
+      assert.ok('rawResponse' in result);
+      assert.ok('completion' in result);
       assert.strictEqual(result.state.summary, 'Test chunk analysis');
       assert.strictEqual(result.state.emotions.patience.score, 7);
       assert.strictEqual(result.usage.input, 150);
       assert.strictEqual(result.usage.output, 100);
+      assert.strictEqual(lastCompleteArgs.model, 'yaml-video-model');
     });
 
-    tNested.test('forwards config.ai.video.params into provider options', async () => {
-      lastCompleteArgs = null;
-
+    await tNested.test('forwards config.ai.video.params into provider options', async () => {
       const input = {
         toolVariables: {
           soulPath,
           goalPath,
           variables: { lenses: ['patience'] }
         },
-        videoContext: {
-          chunkPath: '/tmp/test.mp4',
-          chunkIndex: 0,
-          startTime: 0,
-          endTime: 8,
-          duration: 8
-        },
+        videoContext: { duration: 8, frames: [] },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
         previousState: { summary: '', emotions: {} },
@@ -300,92 +298,108 @@ test('Emotion Lenses Tool', async (t) => {
       assert.strictEqual(lastCompleteArgs.options.topP, 0.2);
     });
 
-    tNested.test('includes raw response when debug.captureRaw is true', async () => {
-      const input = {
-        toolVariables: {
-          soulPath,
-          goalPath,
-          variables: { lenses: ['patience', 'boredom', 'excitement'] }
-        },
-        videoContext: {
-          chunkPath: '/tmp/test.mp4',
-          chunkIndex: 0,
-          startTime: 0,
-          endTime: 8,
-          duration: 8
-        },
-        dialogueContext: { segments: [] },
-        musicContext: { segments: [] },
-        previousState: { summary: '', emotions: {} },
-        config: {
-          ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } },
-          debug: { captureRaw: true }
-        }
-      };
-
-      const result = await emotionLensesTool.analyze(input);
-
-      assert.ok('rawResponse' in result);
-      assert.strictEqual(typeof result.rawResponse, 'string');
-      assert.ok(result.rawResponse.includes('Test chunk analysis'));
-    });
-
-    tNested.test('prompt includes persona content', async () => {
-      const input = {
-        toolVariables: {
-          soulPath,
-          goalPath,
-          variables: { lenses: ['patience'] }
-        },
-        videoContext: { duration: 5 },
-        dialogueContext: { segments: [] },
-        musicContext: { segments: [] },
-        previousState: { summary: '' },
-        config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
-      };
-
-      const result = await emotionLensesTool.analyze(input);
-      // The persona should include the Test Persona name from sample-soul.md
-      assert.ok(result.prompt.includes('Test Persona'));
-      assert.ok(result.prompt.includes('Core Truth'));
-    });
-
-    tNested.test('throws error when toolVariables is invalid', async () => {
+    await tNested.test('throws error when toolVariables is invalid', async () => {
       const input = { toolVariables: null };
       await assert.rejects(emotionLensesTool.analyze(input), /toolVariables is required/);
     });
 
-    tNested.test('throws error when soul file not found', async () => {
+    await tNested.test('throws error when soul file not found', async () => {
       const input = {
         toolVariables: {
           soulPath: '/nonexistent/SOUL.md',
           goalPath,
           variables: { lenses: ['patience'] }
         },
-        videoContext: { duration: 5 },
+        videoContext: { duration: 5, frames: [] },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
         previousState: { summary: '' },
         config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
       };
-      await assert.rejects(emotionLensesTool.analyze(input), /Failed to load persona configuration/);
+      await assert.rejects(emotionLensesTool.analyze(input), /failed to load persona configuration/);
     });
 
-    tNested.test('preserves previous summary across chunks', async () => {
-      const prevInput = {
+    await tNested.test('throws structured error for invalid provider output', async () => {
+      const provider = {
+        complete: async () => ({
+          content: JSON.stringify({
+            summary: 'Broken',
+            emotions: { patience: { score: 20, reasoning: 'Too high' } },
+            dominant_emotion: 'panic',
+            confidence: 5
+          }),
+          usage: { input: 1, output: 1 }
+        })
+      };
+
+      await assert.rejects(
+        emotionLensesTool.analyze({
+          toolVariables: {
+            soulPath,
+            goalPath,
+            variables: { lenses: ['patience'] }
+          },
+          videoContext: { duration: 5, frames: [] },
+          dialogueContext: { segments: [] },
+          musicContext: { segments: [] },
+          previousState: { summary: '' },
+          provider,
+          apiKey: 'override-key',
+          config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
+        }),
+        /Emotion JSON validation failed/
+      );
+    });
+  });
+
+  await t.test('executeEmotionAnalysisToolLoop', async (tNested) => {
+    await tNested.test('runs validator-mediated loop and returns validated final artifact', async () => {
+      const responses = [
+        JSON.stringify({
+          tool: 'validate_emotion_analysis_json',
+          emotionAnalysis: {
+            summary: 'First draft',
+            emotions: {
+              patience: { score: 8, reasoning: 'Calm pacing' },
+              boredom: { score: 2, reasoning: 'Engaging enough' }
+            },
+            dominant_emotion: 'patience',
+            confidence: 0.9
+          }
+        }),
+        JSON.stringify({
+          summary: 'First draft',
+          emotions: {
+            patience: { score: 8, reasoning: 'Calm pacing' },
+            boredom: { score: 2, reasoning: 'Engaging enough' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.9
+        })
+      ];
+
+      const provider = {
+        complete: async () => ({ content: responses.shift(), usage: { input: 10, output: 5 } })
+      };
+
+      const result = await emotionLensesTool.executeEmotionAnalysisToolLoop({
+        provider,
+        adapter: { name: 'openrouter', model: 'yaml-video-model' },
+        apiKey: 'override-key',
         toolVariables: {
           soulPath,
           goalPath,
-          variables: { lenses: ['patience'] }
+          variables: { lenses: ['patience', 'boredom'] }
         },
-        videoContext: { duration: 5 },
-        dialogueContext: { segments: [] },
-        musicContext: { segments: [] },
-        previousState: { summary: 'Previous chunk' },
-        config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
-      };
-      const result = await emotionLensesTool.analyze(prevInput);
-      assert.strictEqual(result.state.previousSummary, 'Previous chunk');
+        basePrompt: 'Base prompt',
+        toolLoopConfig: { maxTurns: 3, maxValidatorCalls: 3 },
+        config: { ai: { video: { model: 'yaml-video-model' } } }
+      });
+
+      assert.strictEqual(result.parsed.summary, 'First draft');
+      assert.strictEqual(result.toolLoop.validatorCalls, 2);
+      assert.strictEqual(result.toolLoop.history[1].kind, 'validator_acceptance');
+      assert.strictEqual(result.toolLoop.history[3].kind, 'final_artifact_revalidation');
     });
   });
 });

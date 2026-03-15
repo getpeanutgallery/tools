@@ -10,5 +10,11 @@
   },
   "dependencies": {
     "ai-providers": "git+ssh://git@github.com/getpeanutgallery/ai-providers.git#main"
-  }
+  },
+  "files": [
+    "emotion-lenses-tool.cjs",
+    "lib/",
+    "README.md",
+    "docs/"
+  ]
 }

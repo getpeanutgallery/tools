@@ -1,94 +1,55 @@
-#!/usr/bin/env node
-/**
- * Emotion Lenses Tool
- * 
- * Analyzes video chunks for emotional content using AI and persona configuration.
- * Self-contained implementation with embedded persona loader.
- */
-
 const fs = require('fs');
 const path = require('path');
+const aiProvider = require('ai-providers/ai-provider-interface.js');
+const { buildProviderOptions } = require('./lib/ai-targets.cjs');
+const { executeLocalValidatorToolLoop } = require('./lib/local-validator-tool-loop.cjs');
+const { parseAndValidateJsonObject, validateEmotionStateObject } = require('./lib/structured-output.cjs');
 
-/**
- * Embedded persona loader - no external dependencies
- */
+const EMOTION_ANALYSIS_TOOL_NAME = 'validate_emotion_analysis_json';
+
 const personaLoader = {
-  /**
-   * Load SOUL.md content
-   */
   loadSoul(soulPath) {
-    if (!soulPath) {
-      console.error('❌ soulPath is required');
-      return null;
-    }
-    
+    if (!soulPath) return null;
+
     let resolvedPath = soulPath;
     if (!path.isAbsolute(soulPath)) {
-      resolvedPath = path.resolve(__dirname, '..', soulPath);
+      resolvedPath = path.resolve(__dirname, soulPath);
     }
-    
-    if (!fs.existsSync(resolvedPath)) {
-      console.error(`❌ SOUL.md not found at path: ${resolvedPath}`);
-      return null;
-    }
-    
-    const content = fs.readFileSync(resolvedPath, 'utf8');
-    return this.parseMarkdown(content);
+
+    if (!fs.existsSync(resolvedPath)) return null;
+    return this.parseMarkdown(fs.readFileSync(resolvedPath, 'utf8'));
   },
 
-  /**
-   * Load GOAL.md content
-   */
   loadGoal(goalPath) {
-    if (!goalPath) {
-      console.error('❌ goalPath is required');
-      return null;
-    }
-    
+    if (!goalPath) return null;
+
     let resolvedPath = goalPath;
     if (!path.isAbsolute(goalPath)) {
-      resolvedPath = path.resolve(__dirname, '..', goalPath);
+      resolvedPath = path.resolve(__dirname, goalPath);
     }
-    
+
     if (fs.existsSync(resolvedPath)) {
-      const content = fs.readFileSync(resolvedPath, 'utf8');
-      return this.parseMarkdown(content);
+      return this.parseMarkdown(fs.readFileSync(resolvedPath, 'utf8'));
     }
-    
-    // Try node_modules/goals
-    const nodeModulesPath = path.resolve(__dirname, '..', 'node_modules', 'goals', goalPath);
-    if (fs.existsSync(nodeModulesPath)) {
-      const content = fs.readFileSync(nodeModulesPath, 'utf8');
-      return this.parseMarkdown(content);
-    }
-    
-    console.error(`❌ GOAL.md not found at path: ${goalPath}`);
-    return null;
+
+    const nodeModulesPath = path.resolve(__dirname, 'node_modules', 'goals', goalPath);
+    if (!fs.existsSync(nodeModulesPath)) return null;
+    return this.parseMarkdown(fs.readFileSync(nodeModulesPath, 'utf8'));
   },
 
-  /**
-   * Load complete persona config
-   */
   loadPersonaConfig(soulPath, goalPath) {
     const soul = this.loadSoul(soulPath);
     const goal = this.loadGoal(goalPath);
-    
-    if (!soul || !goal) {
-      return null;
-    }
-    
+    if (!soul || !goal) return null;
     return { soul, goal, tools: null };
   },
 
-  /**
-   * Parse markdown into sections (keyed by heading)
-   */
   parseMarkdown(markdown) {
     const sections = {};
     const lines = markdown.split('\n');
     let currentSection = 'header';
     let currentContent = [];
-    
+
     for (const line of lines) {
       if (line.startsWith('## ')) {
         if (currentContent.length > 0) {
@@ -100,39 +61,15 @@ const personaLoader = {
         currentContent.push(line);
       }
     }
-    
+
     if (currentContent.length > 0) {
       sections[currentSection] = currentContent.join('\n').trim();
     }
-    
+
     return sections;
   }
 };
 
-/**
- * Get AI provider from YAML config (source of truth)
- */
-async function getAIProvider(config) {
-  try {
-    const aiProvider = require('ai-providers/ai-provider-interface.js');
-    const provider = typeof aiProvider.getProviderFromConfig === 'function'
-      ? aiProvider.getProviderFromConfig(config)
-      : aiProvider.loadProvider(config?.ai?.provider || 'openrouter');
-    const apiKey = process.env.AI_API_KEY;
-    if (!apiKey) {
-      throw new Error('AI_API_KEY is required');
-    }
-    return { provider, apiKey };
-  } catch (e) {
-    throw new Error(`AI provider unavailable: ${e.message}`);
-  }
-}
-
-/**
- * Validate tool variables
- * @param {Object} toolVariables - The tool variables to validate
- * @returns {Object} { valid: boolean, error?: string }
- */
 function validateVariables(toolVariables) {
   if (!toolVariables) {
     return { valid: false, error: 'toolVariables is required' };
@@ -149,19 +86,12 @@ function validateVariables(toolVariables) {
   return { valid: true };
 }
 
-/**
- * Build prompt for emotion analysis
- * @param {Object} personaConfig - Persona configuration (soul, goal, tools)
- * @param {Object} options - Analysis options (lenses, videoContext, dialogueContext, musicContext, previousState)
- * @returns {string} The constructed prompt
- */
 function buildPrompt(personaConfig, options) {
   const { lenses, videoContext, dialogueContext, musicContext, previousState } = options;
 
   let prompt = '';
-
-  // Persona section
   prompt += '# PERSONA\n\n';
+
   if (personaConfig.soul) {
     prompt += Object.entries(personaConfig.soul).map(([k, v]) => `## ${k}\n${v}`).join('\n\n') + '\n\n';
   }
@@ -172,31 +102,28 @@ function buildPrompt(personaConfig, options) {
     prompt += Object.entries(personaConfig.tools).map(([k, v]) => `## ${k}\n${v}`).join('\n\n') + '\n\n';
   }
 
-  // Evaluation goal
   prompt += '# EVALUATION GOAL\n\n';
   prompt += `Analyze the emotional content of this video chunk using the following lenses: ${lenses.join(', ')}.\n\n`;
 
-  // Emotion lenses
   prompt += '# EMOTION LENSES TO TRACK\n\n';
-  lenses.forEach(lens => {
+  lenses.forEach((lens) => {
     prompt += `## ${lens}\n- Score (1-10): How intense is this emotion?\n- Reasoning: Brief explanation\n\n`;
   });
 
-  // Context
   prompt += '# CONTEXT\n\n';
   if (previousState && previousState.summary) {
     prompt += `## Previous Summary\n${previousState.summary}\n\n`;
   }
   if (dialogueContext && dialogueContext.segments && dialogueContext.segments.length > 0) {
     prompt += '## Dialogue\n';
-    dialogueContext.segments.forEach(seg => {
+    dialogueContext.segments.forEach((seg) => {
       prompt += `- ${seg.start.toFixed(1)}s-${seg.end.toFixed(1)}s: ${seg.speaker || 'Speaker'}: ${seg.text}\n`;
     });
     prompt += '\n';
   }
   if (musicContext && musicContext.segments && musicContext.segments.length > 0) {
     prompt += '## Music\n';
-    musicContext.segments.forEach(seg => {
+    musicContext.segments.forEach((seg) => {
       prompt += `- ${seg.start.toFixed(1)}s-${seg.end.toFixed(1)}s: ${seg.type}${seg.mood ? `, mood: ${seg.mood}` : ''}${seg.intensity ? `, intensity: ${seg.intensity}` : ''}\n`;
     });
     prompt += '\n';
@@ -209,163 +136,318 @@ function buildPrompt(personaConfig, options) {
     prompt += '\n';
   }
 
-  // Instructions
   prompt += '# INSTRUCTIONS\n\n';
-  prompt += 'Respond with a JSON object (ONLY the JSON, no markdown) containing:\n';
+  prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
+  prompt += 'The final JSON object must contain exactly the emotion-analysis artifact for this chunk.\n';
+  prompt += 'Required shape:\n';
   prompt += '{\n';
   prompt += '  "summary": "Brief summary of this chunk (1-2 sentences)",\n';
   prompt += '  "emotions": {\n';
-  lenses.forEach((lens, i) => {
-    prompt += `    "${lens}": { "score": <1-10>, "reasoning": "explanation" }${i < lenses.length - 1 ? ',' : ''}\n`;
+  lenses.forEach((lens, index) => {
+    prompt += `    "${lens}": { "score": <1-10>, "reasoning": "explanation" }${index < lenses.length - 1 ? ',' : ''}\n`;
   });
   prompt += '  },\n';
   prompt += '  "dominant_emotion": "the most prominent emotion lens",\n';
   prompt += '  "confidence": <0.0-1.0>\n';
   prompt += '}\n';
+  prompt += 'dominant_emotion must match one of the configured lens names.\n';
 
   return prompt;
 }
 
-/**
- * Parse AI response into state object
- * @param {string} responseContent - Raw AI response
- * @param {Object} previousState - Previous chunk state (for previousSummary)
- * @param {string[]} lenses - Configured lenses
- * @returns {Object} Parsed state
- */
-function parseResponse(responseContent, previousState, lenses) {
-  let data;
-  try {
-    data = JSON.parse(responseContent.trim());
-  } catch (e) {
-    const jsonMatch = responseContent.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      try {
-        data = JSON.parse(jsonMatch[1].trim());
-      } catch (e2) {
-        data = null;
+function buildContract({ name, description, argumentKey, candidateDescription, example }) {
+  return {
+    name,
+    argumentKey,
+    description,
+    canonicalEnvelope: {
+      tool: name,
+      [argumentKey]: example
+    },
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: [argumentKey],
+      properties: {
+        [argumentKey]: {
+          type: 'object',
+          description: candidateDescription
+        }
       }
     }
-  }
-
-  if (!data) {
-    const emotions = {};
-    lenses.forEach(lens => {
-      emotions[lens] = { score: 5, reasoning: 'Default - could not parse response' };
-    });
-    return {
-      summary: 'Analysis completed',
-      emotions,
-      dominant_emotion: lenses[0] || 'unknown',
-      confidence: 0.5,
-      previousSummary: previousState?.summary || ''
-    };
-  }
-
-  const emotions = {};
-  lenses.forEach(lens => {
-    if (data.emotions && data.emotions[lens]) {
-      emotions[lens] = {
-        score: data.emotions[lens].score || 5,
-        reasoning: data.emotions[lens].reasoning || ''
-      };
-    } else {
-      emotions[lens] = { score: 5, reasoning: 'Missing from response' };
-    }
-  });
-
-  return {
-    summary: data.summary || 'No summary provided',
-    emotions,
-    dominant_emotion: data.dominant_emotion || lenses[0],
-    confidence: typeof data.confidence === 'number' ? data.confidence : 0.7,
-    previousSummary: previousState?.summary || ''
   };
 }
 
-/**
- * Analyze a video chunk
- * @param {Object} input - Input object with toolVariables, videoContext, dialogueContext, musicContext, previousState
- * @returns {Promise<Object>} Analysis result with prompt, state, usage
- */
-async function analyze(input) {
-  const { toolVariables, videoContext, dialogueContext, musicContext, previousState, config } = input;
-
-  // Validate
-  const validation = validateVariables(toolVariables);
-  if (!validation.valid) {
-    throw new Error(`EmotionLensesTool: ${validation.error}`);
+function normalizeObjectArgument(args, argumentKey) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return {
+      ok: false,
+      errors: [{ path: '$', code: 'invalid_tool_arguments', message: `Tool arguments must be a JSON object containing ${argumentKey}.` }]
+    };
   }
 
-  // Load persona config using embedded loader
+  const value = args[argumentKey];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      ok: false,
+      errors: [{ path: `$.${argumentKey}`, code: 'invalid_tool_arguments', message: `${argumentKey} must be a JSON object.` }]
+    };
+  }
+
+  return {
+    ok: true,
+    value: { [argumentKey]: value }
+  };
+}
+
+function buildToolResult({ validation, toolName, invalidArgsSummary }) {
+  if (!validation) {
+    return {
+      ok: false,
+      valid: false,
+      toolName,
+      summary: invalidArgsSummary,
+      errors: [],
+      normalizedValue: null
+    };
+  }
+
+  return {
+    ok: validation.ok,
+    valid: validation.ok,
+    toolName,
+    summary: validation.ok
+      ? 'Emotion analysis JSON is valid. Return the final JSON artifact.'
+      : validation.summary,
+    errors: validation.errors,
+    normalizedValue: validation.ok ? validation.value : null
+  };
+}
+
+function buildEmotionAnalysisValidatorToolContract({ lenses = [] } = {}) {
+  const exampleEmotions = {};
+  for (const lens of lenses) {
+    exampleEmotions[lens] = { score: 6, reasoning: `${lens} evidence from the chunk.` };
+  }
+
+  return buildContract({
+    name: EMOTION_ANALYSIS_TOOL_NAME,
+    argumentKey: 'emotionAnalysis',
+    description: 'Validate a Phase 2 video chunk emotion-analysis JSON candidate against the required local schema before final submission.',
+    candidateDescription: 'Candidate emotion-analysis JSON with summary, dominant_emotion, confidence, and one emotions entry per configured lens.',
+    example: {
+      summary: 'The speaker stays calm and measured while tension slowly rises.',
+      emotions: exampleEmotions,
+      dominant_emotion: lenses[0] || 'patience',
+      confidence: 0.82
+    }
+  });
+}
+
+function executeEmotionAnalysisValidatorTool(args, { lenses = [] } = {}) {
+  const normalizedArgs = normalizeObjectArgument(args, 'emotionAnalysis');
+  if (!normalizedArgs.ok) {
+    return {
+      ok: false,
+      valid: false,
+      toolName: EMOTION_ANALYSIS_TOOL_NAME,
+      summary: 'Tool arguments were invalid. Provide {"emotionAnalysis": {...}}.',
+      errors: normalizedArgs.errors,
+      normalizedValue: null
+    };
+  }
+
+  const validation = validateEmotionStateObject(normalizedArgs.value.emotionAnalysis, lenses);
+  return buildToolResult({
+    validation,
+    toolName: EMOTION_ANALYSIS_TOOL_NAME,
+    invalidArgsSummary: 'Tool arguments were invalid. Provide {"emotionAnalysis": {...}}.'
+  });
+}
+
+function getActiveProvider({ provider, config }) {
+  return provider || (typeof aiProvider.getProviderFromConfig === 'function'
+    ? aiProvider.getProviderFromConfig(config)
+    : aiProvider.loadProvider(config?.ai?.provider || 'openrouter'));
+}
+
+function getResolvedModel({ adapter, config }) {
+  return adapter?.model || config?.ai?.video?.model;
+}
+
+function getCompletionDefaults() {
+  return {
+    temperature: 0.3
+  };
+}
+
+function buildBasePromptFromInput(input) {
+  const { toolVariables, videoContext, dialogueContext, musicContext, previousState } = input;
   const personaConfig = personaLoader.loadPersonaConfig(toolVariables.soulPath, toolVariables.goalPath);
   if (!personaConfig) {
-    throw new Error('Failed to load persona configuration');
+    throw new Error('EmotionLensesTool: failed to load persona configuration');
   }
 
-  // Build prompt
-  const prompt = buildPrompt(personaConfig, {
+  return buildPrompt(personaConfig, {
     lenses: toolVariables.variables.lenses,
     videoContext,
     dialogueContext,
     musicContext,
     previousState
   });
+}
 
-  // Get AI provider and model from YAML config
-  const { provider, apiKey } = await getAIProvider(config);
-  const model = config?.ai?.video?.model;
+function parseResponse(responseContent, previousState, lenses) {
+  const parsed = parseAndValidateJsonObject(responseContent, (value) => validateEmotionStateObject(value, lenses));
+  if (!parsed.ok) {
+    const error = new Error(parsed.summary || 'EmotionLensesTool: invalid JSON response');
+    error.structuredOutput = parsed;
+    error.rawResponse = typeof responseContent === 'string' ? responseContent : null;
+    throw error;
+  }
+
+  return {
+    ...parsed.value,
+    previousSummary: previousState?.summary || ''
+  };
+}
+
+async function analyze(input) {
+  const { toolVariables, videoContext, dialogueContext, musicContext, previousState, config, provider, adapter, apiKey } = input;
+
+  const validation = validateVariables(toolVariables);
+  if (!validation.valid) {
+    throw new Error(`EmotionLensesTool: ${validation.error}`);
+  }
+
+  const prompt = buildBasePromptFromInput({
+    toolVariables,
+    videoContext,
+    dialogueContext,
+    musicContext,
+    previousState
+  });
+
+  const activeProvider = getActiveProvider({ provider, config });
+
+  const resolvedApiKey = apiKey || process.env.AI_API_KEY;
+  if (!resolvedApiKey) {
+    throw new Error('EmotionLensesTool: AI_API_KEY is required');
+  }
+
+  const model = getResolvedModel({ adapter, config });
   if (!model) {
     throw new Error('EmotionLensesTool: config.ai.video.model is required');
   }
 
-  // Legacy compatibility: tool_variables.variables.model must match YAML model if present
-  const legacyModel = toolVariables?.variables?.model;
-  if (legacyModel && legacyModel !== model) {
-    throw new Error(
-      `EmotionLensesTool: tool_variables.variables.model (${legacyModel}) does not match config.ai.video.model (${model})`
-    );
-  }
-
-  const adapterParams = config?.ai?.video?.params;
-  const forwardedParams = adapterParams
-    && typeof adapterParams === 'object'
-    && adapterParams !== null
-    && !Array.isArray(adapterParams)
-    ? adapterParams
-    : {};
-
-  // Call AI
-  const response = await provider.complete({
+  const completion = await activeProvider.complete({
     prompt,
     model,
-    apiKey,
-    options: {
-      temperature: 0.3,
-      maxTokens: 1024,
-      ...forwardedParams
-    }
+    apiKey: resolvedApiKey,
+    options: buildProviderOptions({
+      adapter: adapter || { name: config?.ai?.provider || 'openrouter', params: config?.ai?.video?.params },
+      defaults: getCompletionDefaults()
+    })
   });
 
-  // Parse response
-  const state = parseResponse(response.content, previousState, toolVariables.variables.lenses);
-
-  const result = {
-    prompt,
-    state,
-    usage: response.usage
-  };
-
-  if (config?.debug?.captureRaw) {
-    result.rawResponse = response.content;
+  const parsed = parseAndValidateJsonObject(completion?.content, (value) => validateEmotionStateObject(value, toolVariables.variables.lenses));
+  if (!parsed.ok) {
+    const error = new Error(parsed.summary || 'EmotionLensesTool: invalid JSON response');
+    error.structuredOutput = parsed;
+    error.rawResponse = completion?.content || null;
+    error.completion = completion || null;
+    error.prompt = prompt;
+    throw error;
   }
 
-  return result;
+  return {
+    prompt,
+    rawResponse: completion?.content || null,
+    state: {
+      ...parsed.value,
+      previousSummary: previousState?.summary || ''
+    },
+    usage: completion?.usage || null,
+    completion
+  };
+}
+
+async function executeEmotionAnalysisToolLoop({
+  provider,
+  adapter,
+  toolVariables,
+  basePrompt,
+  toolLoopConfig,
+  promptRef,
+  events,
+  ctx,
+  apiKey,
+  config
+}) {
+  const validation = validateVariables(toolVariables);
+  if (!validation.valid) {
+    throw new Error(`EmotionLensesTool: ${validation.error}`);
+  }
+
+  const resolvedApiKey = apiKey || process.env.AI_API_KEY;
+  if (!resolvedApiKey) {
+    throw new Error('EmotionLensesTool: AI_API_KEY is required');
+  }
+
+  const model = getResolvedModel({ adapter, config });
+  if (!model) {
+    throw new Error('EmotionLensesTool: config.ai.video.model is required');
+  }
+
+  const toolContract = buildEmotionAnalysisValidatorToolContract({
+    lenses: toolVariables?.variables?.lenses || []
+  });
+
+  return executeLocalValidatorToolLoop({
+    provider,
+    adapter,
+    basePrompt,
+    toolContract,
+    toolLoopConfig,
+    promptRef,
+    events,
+    ctx,
+    phaseKey: 'phase2-process',
+    scriptId: 'video-chunks',
+    domain: 'video',
+    artifactLabel: 'emotion analysis',
+    finalArtifactDescription: 'The final artifact must be the emotion-analysis JSON object for this video chunk.',
+    finalArtifactRules: [
+      'Include summary, emotions, dominant_emotion, and confidence.',
+      'Provide exactly one emotions entry per configured lens.',
+      'Each emotions.<lens>.score must be between 1 and 10.',
+      'dominant_emotion must match one of the configured lens names.',
+      'confidence must be between 0 and 1.'
+    ],
+    callProvider: ({ prompt }) => provider.complete({
+      prompt,
+      model,
+      apiKey: resolvedApiKey,
+      options: buildProviderOptions({
+        adapter,
+        defaults: getCompletionDefaults()
+      })
+    }),
+    executeValidatorTool: (args) => executeEmotionAnalysisValidatorTool(args, {
+      lenses: toolVariables?.variables?.lenses || []
+    }),
+    normalizeValidatedValue: (value) => JSON.stringify(value)
+  });
 }
 
 module.exports = {
+  EMOTION_ANALYSIS_TOOL_NAME,
   validateVariables,
   buildPrompt,
+  buildBasePromptFromInput,
+  buildEmotionAnalysisValidatorToolContract,
+  executeEmotionAnalysisValidatorTool,
+  executeEmotionAnalysisToolLoop,
   parseResponse,
   analyze
 };

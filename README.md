@@ -1,12 +1,21 @@
 # Tools
 
-This package contains tools for the emotion-engine pipeline.
+This package contains shared tools for the peanut-gallery emotion-engine pipeline.
 
-> Note: `emotion-engine` now owns the canonical emotion-lenses contract/runtime. This repo should be treated as a downstream package surface, not the contract source. See `docs/EMOTION-LENSES-ALIGNMENT-AUDIT-2026-03-14.md`.
+`emotion-lenses-tool.cjs` is the canonical shared Phase 2 emotion-analysis implementation. `emotion-engine` should consume this package surface directly rather than keeping a hidden divergent runtime owner in-repo.
 
 ## emotion-lenses-tool
 
-Analyzes video chunks for emotional content using AI and persona configuration.
+Analyzes video chunks for emotional content using AI and persona configuration, with the same strict structured-output and validator-tool-loop contract expected by `emotion-engine`.
+
+### Current contract surface
+
+- strict JSON-only prompt contract for the final emotion-analysis artifact
+- lane-specific validator tool contract via `validate_emotion_analysis_json`
+- local validator-tool loop via `executeEmotionAnalysisToolLoop(...)`
+- structured invalid-output failures instead of synthesized fallback success
+- provider option forwarding from `config.ai.video.params`
+- returned `rawResponse` and `completion` metadata for downstream capture/debugging
 
 ### Usage
 
@@ -24,16 +33,27 @@ const result = await emotionLensesTool.analyze({
   videoContext: { duration: 8, frames: [] },
   dialogueContext: { segments: [] },
   musicContext: { segments: [] },
-  previousState: { summary: '' }
+  previousState: { summary: '' },
+  config: {
+    ai: {
+      provider: 'openrouter',
+      video: { model: 'openrouter/google/gemini-3.1-pro-preview' }
+    }
+  }
 });
 ```
 
 ### API
 
-- `validateVariables(toolVariables)` - Validate configuration
-- `buildPrompt(personaConfig, options)` - Build analysis prompt
-- `parseResponse(responseContent, previousState, lenses)` - Parse AI response
-- `analyze(input)` - Run complete analysis
+- `EMOTION_ANALYSIS_TOOL_NAME`
+- `validateVariables(toolVariables)`
+- `buildPrompt(personaConfig, options)`
+- `buildBasePromptFromInput(input)`
+- `buildEmotionAnalysisValidatorToolContract({ lenses })`
+- `executeEmotionAnalysisValidatorTool(args, { lenses })`
+- `executeEmotionAnalysisToolLoop({ ... })`
+- `parseResponse(responseContent, previousState, lenses)`
+- `analyze(input)`
 
 ## Testing
 
