@@ -2,6 +2,8 @@
 
 This package contains tools for the emotion-engine pipeline.
 
+> Note: `emotion-engine` now owns the canonical emotion-lenses contract/runtime. This repo should be treated as a downstream package surface, not the contract source. See `docs/EMOTION-LENSES-ALIGNMENT-AUDIT-2026-03-14.md`.
+
 ## emotion-lenses-tool
 
 Analyzes video chunks for emotional content using AI and persona configuration.
