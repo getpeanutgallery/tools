@@ -37,6 +37,14 @@ That drift has now been corrected in favor of the intended polyrepo ownership mo
 - `executeEmotionAnalysisToolLoop(...)`
 - `EMOTION_ANALYSIS_TOOL_NAME`
 
-## Remaining follow-up
+## 2026-03-15 closure addendum
 
-The next repo task should remove or reduce the accidental engine-local ownership surface so runtime/tests/configs resolve directly to the sibling tools package without a hidden canonical copy inside `emotion-engine`.
+That follow-up has now landed.
+
+Current live state:
+
+- `emotion-engine` imports `../../../../tools/emotion-lenses-tool.cjs` directly from `server/scripts/process/video-chunks.cjs`
+- the old engine-local canonical file (`emotion-engine/server/lib/emotion-lenses-tool.cjs`) is gone
+- configs continue to point at the sibling `../tools/emotion-lenses-tool.cjs` path
+
+This audit should now be read as the pre-fix rationale for `ee-cwi.4`, not as an open recommendation.
