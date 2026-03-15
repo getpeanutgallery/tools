@@ -11,8 +11,9 @@ Analyzes video chunks for emotional content using AI and persona configuration, 
 ### Current contract surface
 
 - strict JSON-only prompt contract for the final emotion-analysis artifact
+- Option B enum guidance for closed string fields: keep example JSON concrete and document nearby allowed values explicitly (for example `Allowed values for dominant_emotion: <lens1> | <lens2> | ...`)
 - lane-specific validator tool contract via `validate_emotion_analysis_json`
-- local validator-tool loop via `executeEmotionAnalysisToolLoop(...)`
+- local validator-tool loop via `executeEmotionAnalysisToolLoop(...)`, using the canonical minimal tool-call envelope and the shared `valid=true` acceptance wording
 - structured invalid-output failures instead of synthesized fallback success
 - provider option forwarding from `config.ai.video.params`
 - returned `rawResponse` and `completion` metadata for downstream capture/debugging

@@ -147,9 +147,10 @@ function buildPrompt(personaConfig, options) {
     prompt += `    "${lens}": { "score": <1-10>, "reasoning": "explanation" }${index < lenses.length - 1 ? ',' : ''}\n`;
   });
   prompt += '  },\n';
-  prompt += '  "dominant_emotion": "the most prominent emotion lens",\n';
+  prompt += '  "dominant_emotion": "patience",\n';
   prompt += '  "confidence": <0.0-1.0>\n';
   prompt += '}\n';
+  prompt += `Allowed values for dominant_emotion: ${lenses.join(' | ')}.\n`;
   prompt += 'dominant_emotion must match one of the configured lens names.\n';
 
   return prompt;

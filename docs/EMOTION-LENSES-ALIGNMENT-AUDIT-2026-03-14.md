@@ -47,4 +47,12 @@ Current live state:
 - the old engine-local canonical file (`emotion-engine/server/lib/emotion-lenses-tool.cjs`) is gone
 - configs continue to point at the sibling `../tools/emotion-lenses-tool.cjs` path
 
-This audit should now be read as the pre-fix rationale for `ee-cwi.4`, not as an open recommendation.
+## 2026-03-15 prompt-contract consistency addendum
+
+A follow-up sibling-repo wording sweep aligned the remaining tools-owned prompt surface to the current cross-repo contract standard:
+
+- `emotion-lenses-tool.cjs` now follows Option B for the closed string field `dominant_emotion` by keeping the JSON example concrete and adding an explicit nearby allowed-values note.
+- `lib/local-validator-tool-loop.cjs` was rechecked and already matched the agreed validator-tool wording standard, including the canonical minimal envelope instruction, the shared wrapper-key prohibition sentence, and the `valid=true` acceptance wording, so it was intentionally left unchanged.
+- `README.md` and `test/emotion-lenses-tool.test.js` were updated to document and verify the same wording standard.
+
+This audit should now be read as the pre-fix rationale for `ee-cwi.4`, plus the sibling-repo consistency note for the 2026-03-15 wording sweep.

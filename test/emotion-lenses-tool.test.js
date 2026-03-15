@@ -119,6 +119,7 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(prompt.includes('# CONTEXT'));
       assert.ok(prompt.includes('# INSTRUCTIONS'));
       assert.ok(prompt.includes('Return JSON only.'));
+      assert.ok(prompt.includes('Allowed values for dominant_emotion: patience | boredom.'));
       assert.ok(prompt.includes('dominant_emotion must match one of the configured lens names'));
       assert.ok(prompt.includes('Previous chunk summary'));
       assert.ok(prompt.includes('Speaker 1'));
