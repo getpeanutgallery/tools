@@ -107,7 +107,14 @@ test('Emotion Lenses Tool', async (t) => {
       };
       const options = {
         lenses: ['patience', 'boredom'],
-        videoContext: { duration: 8, frames: [] },
+        videoContext: {
+          chunkPath: __filename,
+          mimeType: 'video/mp4',
+          transferStrategy: 'base64',
+          duration: 8,
+          startTime: 0,
+          endTime: 8
+        },
         dialogueContext: { segments: [{ start: 0, end: 5, speaker: 'Speaker 1', text: 'Hello' }] },
         musicContext: { segments: [{ start: 0, end: 5, type: 'music', mood: 'tense', intensity: 6 }] },
         previousState: { summary: 'Previous chunk summary' }
@@ -118,6 +125,8 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(prompt.includes('# EMOTION LENSES TO TRACK'));
       assert.ok(prompt.includes('# CONTEXT'));
       assert.ok(prompt.includes('# INSTRUCTIONS'));
+      assert.ok(prompt.includes('Ground your judgment in the attached video chunk first'));
+      assert.ok(prompt.includes('Attached video chunk: video/mp4 (base64)'));
       assert.ok(prompt.includes('Return JSON only.'));
       assert.ok(prompt.includes('Allowed values for dominant_emotion: patience | boredom.'));
       assert.ok(prompt.includes('dominant_emotion must match one of the configured lens names'));
@@ -133,7 +142,7 @@ test('Emotion Lenses Tool', async (t) => {
           goalPath,
           variables: { lenses: ['patience', 'boredom'] }
         },
-        videoContext: { duration: 8, frames: [] },
+        videoContext: { chunkPath: __filename, mimeType: 'video/mp4', transferStrategy: 'base64', duration: 8 },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
         previousState: { summary: '' }
@@ -238,12 +247,13 @@ test('Emotion Lenses Tool', async (t) => {
           variables: { lenses: ['patience', 'boredom', 'excitement'] }
         },
         videoContext: {
-          chunkPath: '/tmp/test.mp4',
+          chunkPath: __filename,
           chunkIndex: 0,
           startTime: 0,
           endTime: 8,
           duration: 8,
-          frames: []
+          mimeType: 'video/mp4',
+          transferStrategy: 'base64'
         },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
@@ -263,6 +273,11 @@ test('Emotion Lenses Tool', async (t) => {
       assert.strictEqual(result.usage.input, 150);
       assert.strictEqual(result.usage.output, 100);
       assert.strictEqual(lastCompleteArgs.model, 'yaml-video-model');
+      assert.strictEqual(lastCompleteArgs.attachments.length, 1);
+      assert.strictEqual(lastCompleteArgs.attachments[0].type, 'video');
+      assert.strictEqual(lastCompleteArgs.attachments[0].mimeType, 'video/mp4');
+      assert.ok(typeof lastCompleteArgs.attachments[0].data === 'string');
+      assert.ok(lastCompleteArgs.attachments[0].data.length > 0);
     });
 
     await tNested.test('forwards config.ai.video.params into provider options', async () => {
@@ -272,7 +287,7 @@ test('Emotion Lenses Tool', async (t) => {
           goalPath,
           variables: { lenses: ['patience'] }
         },
-        videoContext: { duration: 8, frames: [] },
+        videoContext: { chunkPath: __filename, mimeType: 'video/mp4', transferStrategy: 'base64', duration: 8 },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
         previousState: { summary: '', emotions: {} },
@@ -311,7 +326,7 @@ test('Emotion Lenses Tool', async (t) => {
           goalPath,
           variables: { lenses: ['patience'] }
         },
-        videoContext: { duration: 5, frames: [] },
+        videoContext: { chunkPath: __filename, mimeType: 'video/mp4', transferStrategy: 'base64', duration: 5 },
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
         previousState: { summary: '' },
@@ -340,7 +355,7 @@ test('Emotion Lenses Tool', async (t) => {
             goalPath,
             variables: { lenses: ['patience'] }
           },
-          videoContext: { duration: 5, frames: [] },
+          videoContext: { chunkPath: __filename, mimeType: 'video/mp4', transferStrategy: 'base64', duration: 5 },
           dialogueContext: { segments: [] },
           musicContext: { segments: [] },
           previousState: { summary: '' },
@@ -379,8 +394,12 @@ test('Emotion Lenses Tool', async (t) => {
         })
       ];
 
+      let lastToolLoopArgs = null;
       const provider = {
-        complete: async () => ({ content: responses.shift(), usage: { input: 10, output: 5 } })
+        complete: async (args) => {
+          lastToolLoopArgs = args;
+          return { content: responses.shift(), usage: { input: 10, output: 5 } };
+        }
       };
 
       const result = await emotionLensesTool.executeEmotionAnalysisToolLoop({
@@ -392,6 +411,12 @@ test('Emotion Lenses Tool', async (t) => {
           goalPath,
           variables: { lenses: ['patience', 'boredom'] }
         },
+        videoContext: {
+          chunkPath: __filename,
+          mimeType: 'video/mp4',
+          transferStrategy: 'base64',
+          duration: 8
+        },
         basePrompt: 'Base prompt',
         toolLoopConfig: { maxTurns: 3, maxValidatorCalls: 3 },
         config: { ai: { video: { model: 'yaml-video-model' } } }
@@ -401,6 +426,11 @@ test('Emotion Lenses Tool', async (t) => {
       assert.strictEqual(result.toolLoop.validatorCalls, 2);
       assert.strictEqual(result.toolLoop.history[1].kind, 'validator_acceptance');
       assert.strictEqual(result.toolLoop.history[3].kind, 'final_artifact_revalidation');
+      assert.strictEqual(lastToolLoopArgs.attachments.length, 1);
+      assert.strictEqual(lastToolLoopArgs.attachments[0].type, 'video');
+      assert.strictEqual(lastToolLoopArgs.attachments[0].mimeType, 'video/mp4');
+      assert.ok(typeof lastToolLoopArgs.attachments[0].data === 'string');
+      assert.ok(lastToolLoopArgs.attachments[0].data.length > 0);
     });
   });
 });

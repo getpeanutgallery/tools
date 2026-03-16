@@ -86,8 +86,72 @@ function validateVariables(toolVariables) {
   return { valid: true };
 }
 
+function detectVideoMimeType(videoContext = {}) {
+  if (typeof videoContext?.mimeType === 'string' && videoContext.mimeType.trim().length > 0) {
+    return videoContext.mimeType.trim();
+  }
+
+  const candidatePath = videoContext?.chunkPath || videoContext?.url || '';
+  const ext = path.extname(candidatePath).toLowerCase();
+
+  if (ext === '.mov') return 'video/quicktime';
+  if (ext === '.webm') return 'video/webm';
+  if (ext === '.mkv') return 'video/x-matroska';
+  return 'video/mp4';
+}
+
+function getInlineVideoBase64(videoContext = {}) {
+  if (typeof videoContext?.chunkBase64 === 'string' && videoContext.chunkBase64.length > 0) {
+    return videoContext.chunkBase64;
+  }
+  if (typeof videoContext?.base64 === 'string' && videoContext.base64.length > 0) {
+    return videoContext.base64;
+  }
+  if (typeof videoContext?.data === 'string' && videoContext.data.length > 0) {
+    return videoContext.data;
+  }
+  if (typeof videoContext?.chunkPath === 'string' && videoContext.chunkPath.length > 0 && fs.existsSync(videoContext.chunkPath)) {
+    return fs.readFileSync(videoContext.chunkPath).toString('base64');
+  }
+  return null;
+}
+
+function buildVideoAttachments(videoContext) {
+  if (!videoContext || typeof videoContext !== 'object') return [];
+
+  const mimeType = detectVideoMimeType(videoContext);
+  const base64Data = getInlineVideoBase64(videoContext);
+
+  if (base64Data) {
+    return [{
+      type: 'video',
+      data: base64Data,
+      mimeType
+    }];
+  }
+
+  if (typeof videoContext.url === 'string' && videoContext.url.length > 0) {
+    return [{
+      type: 'video',
+      url: videoContext.url,
+      mimeType
+    }];
+  }
+
+  if (typeof videoContext.chunkPath === 'string' && videoContext.chunkPath.length > 0) {
+    return [{
+      type: 'video',
+      path: videoContext.chunkPath,
+      mimeType
+    }];
+  }
+
+  return [];
+}
+
 function buildPrompt(personaConfig, options) {
   const { lenses, videoContext, dialogueContext, musicContext, previousState } = options;
+  const videoAttachments = buildVideoAttachments(videoContext);
 
   let prompt = '';
   prompt += '# PERSONA\n\n';
@@ -112,7 +176,7 @@ function buildPrompt(personaConfig, options) {
 
   prompt += '# CONTEXT\n\n';
   if (previousState && previousState.summary) {
-    prompt += `## Previous Summary\n${previousState.summary}\n\n`;
+    prompt += `## Previous Summary (continuity only — do not let this override fresh evidence)\n${previousState.summary}\n\n`;
   }
   if (dialogueContext && dialogueContext.segments && dialogueContext.segments.length > 0) {
     prompt += '## Dialogue\n';
@@ -130,13 +194,21 @@ function buildPrompt(personaConfig, options) {
   }
   if (videoContext) {
     prompt += `## Video\n- Duration: ${videoContext.duration}s\n`;
-    if (videoContext.frames) {
-      prompt += `- Frames: ${videoContext.frames.length} frame(s) extracted\n`;
+    if (typeof videoContext.startTime === 'number' && typeof videoContext.endTime === 'number') {
+      prompt += `- Chunk window: ${videoContext.startTime.toFixed(1)}s-${videoContext.endTime.toFixed(1)}s\n`;
+    }
+    if (videoAttachments.length > 0) {
+      prompt += `- Attached video chunk: ${videoAttachments[0].mimeType || detectVideoMimeType(videoContext)} (${videoContext.transferStrategy || 'base64'})\n`;
+    } else {
+      prompt += '- Attached video chunk: unavailable\n';
     }
     prompt += '\n';
   }
 
   prompt += '# INSTRUCTIONS\n\n';
+  prompt += 'Ground your judgment in the attached video chunk first, then use dialogue and music as supporting context.\n';
+  prompt += 'Treat previous summary as continuity only. Do not let it override what is visible in this chunk.\n';
+  prompt += 'If the visuals are ambiguous, limited, or absent, say so plainly and do not invent unseen actions or scenes.\n';
   prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
   prompt += 'The final JSON object must contain exactly the emotion-analysis artifact for this chunk.\n';
   prompt += 'Required shape:\n';
@@ -345,6 +417,7 @@ async function analyze(input) {
     prompt,
     model,
     apiKey: resolvedApiKey,
+    attachments: buildVideoAttachments(videoContext),
     options: buildProviderOptions({
       adapter: adapter || { name: config?.ai?.provider || 'openrouter', params: config?.ai?.video?.params },
       defaults: getCompletionDefaults()
@@ -377,6 +450,7 @@ async function executeEmotionAnalysisToolLoop({
   provider,
   adapter,
   toolVariables,
+  videoContext,
   basePrompt,
   toolLoopConfig,
   promptRef,
@@ -429,6 +503,7 @@ async function executeEmotionAnalysisToolLoop({
       prompt,
       model,
       apiKey: resolvedApiKey,
+      attachments: buildVideoAttachments(videoContext),
       options: buildProviderOptions({
         adapter,
         defaults: getCompletionDefaults()
@@ -446,6 +521,7 @@ module.exports = {
   validateVariables,
   buildPrompt,
   buildBasePromptFromInput,
+  buildVideoAttachments,
   buildEmotionAnalysisValidatorToolContract,
   executeEmotionAnalysisValidatorTool,
   executeEmotionAnalysisToolLoop,
