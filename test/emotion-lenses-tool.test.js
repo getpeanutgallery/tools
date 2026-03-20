@@ -258,6 +258,7 @@ test('Emotion Lenses Tool', async (t) => {
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
         previousState: { summary: '', emotions: {} },
+        provider: mockAIProvider.getProviderFromConfig(),
         config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
       };
 
@@ -291,6 +292,7 @@ test('Emotion Lenses Tool', async (t) => {
         dialogueContext: { segments: [] },
         musicContext: { segments: [] },
         previousState: { summary: '', emotions: {} },
+        provider: mockAIProvider.getProviderFromConfig(),
         config: {
           ai: {
             provider: 'openrouter',
@@ -333,6 +335,25 @@ test('Emotion Lenses Tool', async (t) => {
         config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } }
       };
       await assert.rejects(emotionLensesTool.analyze(input), /failed to load persona configuration/);
+    });
+
+    await tNested.test('hard-fails when provider is not injected explicitly', async () => {
+      await assert.rejects(
+        emotionLensesTool.analyze({
+          toolVariables: {
+            soulPath,
+            goalPath,
+            variables: { lenses: ['patience'] }
+          },
+          videoContext: { chunkPath: __filename, mimeType: 'video/mp4', transferStrategy: 'base64', duration: 5 },
+          dialogueContext: { segments: [] },
+          musicContext: { segments: [] },
+          previousState: { summary: '' },
+          config: { ai: { provider: 'openrouter', video: { model: 'yaml-video-model' } } },
+          apiKey: 'override-key'
+        }),
+        /provider must be injected explicitly/
+      );
     });
 
     await tNested.test('throws structured error for invalid provider output', async () => {

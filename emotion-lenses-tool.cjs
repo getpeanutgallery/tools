@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const aiProvider = require('ai-providers/ai-provider-interface.js');
 const { buildProviderOptions } = require('./lib/ai-targets.cjs');
 const { executeLocalValidatorToolLoop } = require('./lib/local-validator-tool-loop.cjs');
 const { parseAndValidateJsonObject, validateEmotionStateObject } = require('./lib/structured-output.cjs');
@@ -338,10 +337,23 @@ function executeEmotionAnalysisValidatorTool(args, { lenses = [] } = {}) {
   });
 }
 
-function getActiveProvider({ provider, config }) {
-  return provider || (typeof aiProvider.getProviderFromConfig === 'function'
+function loadLocalAiProviderInterface() {
+  return require('ai-providers/ai-provider-interface.js');
+}
+
+function getActiveProvider({ provider, config, allowConfigProviderFallback = false }) {
+  if (provider && typeof provider.complete === 'function') {
+    return provider;
+  }
+
+  if (!allowConfigProviderFallback) {
+    throw new Error('EmotionLensesTool: provider must be injected explicitly; refusing fallback to tools-local ai-providers install');
+  }
+
+  const aiProvider = loadLocalAiProviderInterface();
+  return typeof aiProvider.getProviderFromConfig === 'function'
     ? aiProvider.getProviderFromConfig(config)
-    : aiProvider.loadProvider(config?.ai?.provider || 'openrouter'));
+    : aiProvider.loadProvider(config?.ai?.provider || 'openrouter');
 }
 
 function getResolvedModel({ adapter, config }) {
@@ -401,7 +413,11 @@ async function analyze(input) {
     previousState
   });
 
-  const activeProvider = getActiveProvider({ provider, config });
+  const activeProvider = getActiveProvider({
+    provider,
+    config,
+    allowConfigProviderFallback: input?.allowConfigProviderFallback === true
+  });
 
   const resolvedApiKey = apiKey || process.env.AI_API_KEY;
   if (!resolvedApiKey) {
