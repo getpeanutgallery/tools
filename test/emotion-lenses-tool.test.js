@@ -116,7 +116,17 @@ test('Emotion Lenses Tool', async (t) => {
           endTime: 8
         },
         dialogueContext: { segments: [{ start: 0, end: 5, speaker: 'Speaker 1', text: 'Hello' }] },
-        musicContext: { segments: [{ start: 0, end: 5, type: 'music', mood: 'tense', intensity: 6 }] },
+        musicContext: {
+          summary: 'Trailer-wide music stays tense and cinematic.',
+          segments: [{
+            start: 0,
+            end: 5,
+            type: 'music',
+            description: 'Aggressive percussion hits under the opening threat.',
+            mood: 'tense',
+            intensity: 6
+          }]
+        },
         previousState: { summary: 'Previous chunk summary' }
       };
       const prompt = emotionLensesTool.buildPrompt(personaConfig, options);
@@ -132,7 +142,86 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(prompt.includes('dominant_emotion must match one of the configured lens names'));
       assert.ok(prompt.includes('Previous chunk summary'));
       assert.ok(prompt.includes('Speaker 1'));
+      assert.ok(prompt.includes('Trailer-wide context: Trailer-wide music stays tense and cinematic.'));
+      assert.ok(prompt.includes('- Active chunk cues:'));
+      assert.ok(prompt.includes('detail: Aggressive percussion hits under the opening threat.'));
       assert.ok(prompt.includes('tense'));
+    });
+
+    await tNested.test('clips overlapping dialogue and music ranges to the active chunk window in the prompt', () => {
+      const personaConfig = {
+        soul: { Identity: 'Test Persona' },
+        goal: { 'Primary Objective': 'Test goal' },
+        tools: {}
+      };
+      const prompt = emotionLensesTool.buildPrompt(personaConfig, {
+        lenses: ['patience', 'boredom'],
+        videoContext: {
+          chunkPath: __filename,
+          mimeType: 'video/mp4',
+          transferStrategy: 'base64',
+          duration: 5,
+          startTime: 50,
+          endTime: 55
+        },
+        dialogueContext: { segments: [{ start: 48, end: 52.5, speaker: 'Speaker 6', text: 'Need a sitrep.' }] },
+        musicContext: {
+          summary: 'The trailer stays high-intensity and tense overall.',
+          segments: [{
+            start: 0,
+            end: 140.042449,
+            type: 'music',
+            description: 'Sustained tense orchestral pulse with pounding percussion.',
+            mood: 'tense',
+            intensity: 8
+          }]
+        },
+        previousState: { summary: '' }
+      });
+
+      assert.ok(prompt.includes('- 50.0s-52.5s: Speaker 6: Need a sitrep.'));
+      assert.ok(prompt.includes('Trailer-wide context: The trailer stays high-intensity and tense overall.'));
+      assert.ok(prompt.includes('- 50.0s-55.0s: music, detail: Sustained tense orchestral pulse with pounding percussion., mood: tense, intensity: 8'));
+      assert.ok(!prompt.includes('0.0s-140.0s: music'));
+      assert.ok(!prompt.includes('48.0s-52.5s: Speaker 6'));
+    });
+
+    await tNested.test('does not truncate trailer-wide or active-chunk music text', () => {
+      const personaConfig = {
+        soul: { Identity: 'Test Persona' },
+        goal: { 'Primary Objective': 'Test goal' },
+        tools: {}
+      };
+      const longSummary = 'Trailer-wide arc: the cue starts with a hush, swells through dread, pivots into bruising percussion, then keeps layering anxious strings without ever fully releasing the pressure before the end card lands.';
+      const longDescription = 'Detailed cue: low brass pulses creep underneath a brittle riser, then syncopated percussion stomps in while scraped strings and distorted impacts keep ratcheting the tension higher instead of resolving cleanly.';
+      const prompt = emotionLensesTool.buildPrompt(personaConfig, {
+        lenses: ['patience'],
+        videoContext: {
+          chunkPath: __filename,
+          mimeType: 'video/mp4',
+          transferStrategy: 'base64',
+          duration: 5,
+          startTime: 10,
+          endTime: 15
+        },
+        dialogueContext: { segments: [] },
+        musicContext: {
+          summary: longSummary,
+          segments: [{
+            start: 10,
+            end: 15,
+            type: 'music',
+            description: longDescription,
+            mood: 'tense',
+            intensity: 9
+          }]
+        },
+        previousState: { summary: '' }
+      });
+
+      assert.ok(prompt.includes(`Trailer-wide context: ${longSummary}`));
+      assert.ok(prompt.includes(`detail: ${longDescription}`));
+      assert.ok(!prompt.includes('…'));
     });
 
     await tNested.test('buildBasePromptFromInput loads persona content', () => {

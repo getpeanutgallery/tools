@@ -148,6 +148,60 @@ function buildVideoAttachments(videoContext) {
   return [];
 }
 
+function getPromptWindow(videoContext = {}) {
+  const startTime = Number(videoContext?.startTime);
+  const endTime = Number(videoContext?.endTime);
+
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    return null;
+  }
+
+  return {
+    startTime,
+    endTime
+  };
+}
+
+function formatSegmentRangeForPrompt(segment = {}, videoContext = {}) {
+  const originalStart = Number(segment?.start);
+  const originalEnd = Number(segment?.end);
+
+  if (!Number.isFinite(originalStart) || !Number.isFinite(originalEnd)) {
+    return `${segment?.start}s-${segment?.end}s`;
+  }
+
+  const window = getPromptWindow(videoContext);
+  if (!window) {
+    return `${originalStart.toFixed(1)}s-${originalEnd.toFixed(1)}s`;
+  }
+
+  const clippedStart = Math.max(window.startTime, originalStart);
+  const clippedEnd = Math.min(window.endTime, originalEnd);
+
+  return `${clippedStart.toFixed(1)}s-${clippedEnd.toFixed(1)}s`;
+}
+
+function normalizePromptText(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function formatMusicSegmentForPrompt(segment = {}, videoContext = {}) {
+  const details = [segment?.type || 'music'];
+
+  if (segment?.description) {
+    details.push(`detail: ${normalizePromptText(segment.description)}`);
+  }
+  if (segment?.mood) {
+    details.push(`mood: ${segment.mood}`);
+  }
+  if (segment?.intensity !== undefined && segment?.intensity !== null && segment?.intensity !== '') {
+    details.push(`intensity: ${segment.intensity}`);
+  }
+
+  return `- ${formatSegmentRangeForPrompt(segment, videoContext)}: ${details.join(', ')}`;
+}
+
 function buildPrompt(personaConfig, options) {
   const { lenses, videoContext, dialogueContext, musicContext, previousState } = options;
   const videoAttachments = buildVideoAttachments(videoContext);
@@ -180,15 +234,22 @@ function buildPrompt(personaConfig, options) {
   if (dialogueContext && dialogueContext.segments && dialogueContext.segments.length > 0) {
     prompt += '## Dialogue\n';
     dialogueContext.segments.forEach((seg) => {
-      prompt += `- ${seg.start.toFixed(1)}s-${seg.end.toFixed(1)}s: ${seg.speaker || 'Speaker'}: ${seg.text}\n`;
+      prompt += `- ${formatSegmentRangeForPrompt(seg, videoContext)}: ${seg.speaker || 'Speaker'}: ${seg.text}\n`;
     });
     prompt += '\n';
   }
-  if (musicContext && musicContext.segments && musicContext.segments.length > 0) {
+  if ((musicContext && Array.isArray(musicContext.segments) && musicContext.segments.length > 0)
+    || (typeof musicContext?.summary === 'string' && musicContext.summary.trim().length > 0)) {
     prompt += '## Music\n';
-    musicContext.segments.forEach((seg) => {
-      prompt += `- ${seg.start.toFixed(1)}s-${seg.end.toFixed(1)}s: ${seg.type}${seg.mood ? `, mood: ${seg.mood}` : ''}${seg.intensity ? `, intensity: ${seg.intensity}` : ''}\n`;
-    });
+    if (typeof musicContext?.summary === 'string' && musicContext.summary.trim().length > 0) {
+      prompt += `- Trailer-wide context: ${normalizePromptText(musicContext.summary)}\n`;
+    }
+    if (Array.isArray(musicContext?.segments) && musicContext.segments.length > 0) {
+      prompt += '- Active chunk cues:\n';
+      musicContext.segments.forEach((seg) => {
+        prompt += `  ${formatMusicSegmentForPrompt(seg, videoContext)}\n`;
+      });
+    }
     prompt += '\n';
   }
   if (videoContext) {
