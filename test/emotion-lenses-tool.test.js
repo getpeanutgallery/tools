@@ -479,7 +479,7 @@ test('Emotion Lenses Tool', async (t) => {
   });
 
   await t.test('executeEmotionAnalysisToolLoop', async (tNested) => {
-    await tNested.test('runs validator-mediated loop and returns validated final artifact', async () => {
+    await tNested.test('short-circuits immediately on first validator acceptance and preserves completion metadata', async () => {
       const responses = [
         JSON.stringify({
           tool: 'validate_emotion_analysis_json',
@@ -492,22 +492,114 @@ test('Emotion Lenses Tool', async (t) => {
             dominant_emotion: 'patience',
             confidence: 0.9
           }
-        }),
-        JSON.stringify({
-          summary: 'First draft',
-          emotions: {
-            patience: { score: 8, reasoning: 'Calm pacing' },
-            boredom: { score: 2, reasoning: 'Engaging enough' }
-          },
-          dominant_emotion: 'patience',
-          confidence: 0.9
         })
       ];
 
       let lastToolLoopArgs = null;
+      let providerCalls = 0;
+      const emittedEvents = [];
       const provider = {
         complete: async (args) => {
+          providerCalls += 1;
           lastToolLoopArgs = args;
+          return { content: responses.shift(), usage: { input: 10, output: 5 } };
+        }
+      };
+
+      const result = await emotionLensesTool.executeEmotionAnalysisToolLoop({
+        provider,
+        adapter: { name: 'openrouter', model: 'yaml-video-model' },
+        apiKey: 'override-key',
+        toolVariables: {
+          soulPath,
+          goalPath,
+          variables: { lenses: ['patience', 'boredom'] }
+        },
+        videoContext: {
+          chunkPath: __filename,
+          mimeType: 'video/mp4',
+          transferStrategy: 'base64',
+          duration: 8
+        },
+        basePrompt: 'Base prompt',
+        toolLoopConfig: { maxTurns: 3, maxValidatorCalls: 3 },
+        events: { emit: (event) => emittedEvents.push(event) },
+        ctx: { attempt: 2, attemptInTarget: 1, targetIndex: 0 },
+        config: { ai: { video: { model: 'yaml-video-model' } } }
+      });
+
+      assert.strictEqual(providerCalls, 1);
+      assert.deepStrictEqual(result.parsed, {
+        summary: 'First draft',
+        emotions: {
+          patience: { score: 8, reasoning: 'Calm pacing' },
+          boredom: { score: 2, reasoning: 'Engaging enough' }
+        },
+        dominant_emotion: 'patience',
+        confidence: 0.9
+      });
+      assert.deepStrictEqual(result.toolLoop.finalArtifact, result.parsed);
+      assert.strictEqual(result.requestPrompt.mode, 'tool_loop');
+      assert.strictEqual(result.requestPrompt.repairSummary, null);
+      assert.strictEqual(result.toolLoop.turns, 1);
+      assert.strictEqual(result.toolLoop.validatorCalls, 1);
+      assert.deepStrictEqual(result.toolLoop.history.map((entry) => entry.kind), [
+        'model_output',
+        'validator_acceptance'
+      ]);
+      assert.strictEqual(emittedEvents.length, 1);
+      assert.deepStrictEqual(emittedEvents[0], {
+        kind: 'tool.loop.complete',
+        phase: 'phase2-process',
+        script: 'video-chunks',
+        domain: 'video',
+        attempt: 2,
+        attemptInTarget: 1,
+        targetIndex: 0,
+        validatorCalls: 1,
+        turns: 1,
+        toolName: 'validate_emotion_analysis_json',
+        provider: 'openrouter',
+        model: 'yaml-video-model'
+      });
+      assert.strictEqual(lastToolLoopArgs.attachments.length, 1);
+      assert.strictEqual(lastToolLoopArgs.attachments[0].type, 'video');
+      assert.strictEqual(lastToolLoopArgs.attachments[0].mimeType, 'video/mp4');
+      assert.ok(typeof lastToolLoopArgs.attachments[0].data === 'string');
+      assert.ok(lastToolLoopArgs.attachments[0].data.length > 0);
+    });
+
+    await tNested.test('preserves invalid repair behavior before acceptance', async () => {
+      const responses = [
+        JSON.stringify({
+          tool: 'validate_emotion_analysis_json',
+          emotionAnalysis: {
+            summary: 'Broken draft',
+            emotions: {
+              patience: { score: 8, reasoning: 'Calm pacing' }
+            },
+            dominant_emotion: 'patience',
+            confidence: 0.9
+          }
+        }),
+        JSON.stringify({
+          tool: 'validate_emotion_analysis_json',
+          emotionAnalysis: {
+            summary: 'Repaired draft',
+            emotions: {
+              patience: { score: 8, reasoning: 'Calm pacing' },
+              boredom: { score: 2, reasoning: 'Engaging enough' }
+            },
+            dominant_emotion: 'patience',
+            confidence: 0.9
+          }
+        })
+      ];
+
+      let providerCalls = 0;
+      const provider = {
+        complete: async () => {
+          providerCalls += 1;
           return { content: responses.shift(), usage: { input: 10, output: 5 } };
         }
       };
@@ -532,15 +624,16 @@ test('Emotion Lenses Tool', async (t) => {
         config: { ai: { video: { model: 'yaml-video-model' } } }
       });
 
-      assert.strictEqual(result.parsed.summary, 'First draft');
+      assert.strictEqual(providerCalls, 2);
+      assert.strictEqual(result.parsed.summary, 'Repaired draft');
+      assert.strictEqual(result.toolLoop.turns, 2);
       assert.strictEqual(result.toolLoop.validatorCalls, 2);
-      assert.strictEqual(result.toolLoop.history[1].kind, 'validator_acceptance');
-      assert.strictEqual(result.toolLoop.history[3].kind, 'final_artifact_revalidation');
-      assert.strictEqual(lastToolLoopArgs.attachments.length, 1);
-      assert.strictEqual(lastToolLoopArgs.attachments[0].type, 'video');
-      assert.strictEqual(lastToolLoopArgs.attachments[0].mimeType, 'video/mp4');
-      assert.ok(typeof lastToolLoopArgs.attachments[0].data === 'string');
-      assert.ok(lastToolLoopArgs.attachments[0].data.length > 0);
+      assert.deepStrictEqual(result.toolLoop.history.map((entry) => entry.kind), [
+        'model_output',
+        'validator_rejection',
+        'model_output',
+        'validator_acceptance'
+      ]);
     });
   });
 });
