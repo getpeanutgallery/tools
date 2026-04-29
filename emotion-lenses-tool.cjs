@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { buildEnglishOnlyOutputRuleBlock } = require('../emotion-engine/server/lib/english-only-contract.cjs');
 const { buildProviderOptions } = require('./lib/ai-targets.cjs');
 const { executeLocalValidatorToolLoop } = require('./lib/local-validator-tool-loop.cjs');
 const { parseAndValidateJsonObject, validateEmotionStateObject } = require('./lib/structured-output.cjs');
@@ -270,6 +271,7 @@ function buildPrompt(personaConfig, options) {
   prompt += 'Treat previous summary as continuity only. Do not let it override what is visible in this chunk.\n';
   prompt += 'If the visuals are ambiguous, limited, or absent, say so plainly and do not invent unseen actions or scenes.\n';
   prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
+  prompt += `${buildEnglishOnlyOutputRuleBlock()}\n`;
   prompt += 'The final JSON object must contain exactly the emotion-analysis artifact for this chunk.\n';
   prompt += 'Required shape:\n';
   prompt += '{\n';
