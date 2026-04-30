@@ -143,8 +143,10 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(prompt.includes('Previous chunk summary'));
       assert.ok(prompt.includes('Speaker 1'));
       assert.ok(prompt.includes('Trailer-wide context: Trailer-wide music stays tense and cinematic.'));
-      assert.ok(prompt.includes('- Active chunk cues:'));
+      assert.ok(prompt.includes('- Relevant global support entries:'));
       assert.ok(prompt.includes('detail: Aggressive percussion hits under the opening threat.'));
+      assert.ok(prompt.includes('cite chunk-local visual evidence from the attached video when available'));
+      assert.ok(prompt.includes('Do not use dialogue, lyrics, music, or previous-summary continuity as a substitute for chunk-local visual grounding.'));
       assert.ok(prompt.includes('tense'));
     });
 
@@ -179,11 +181,10 @@ test('Emotion Lenses Tool', async (t) => {
         previousState: { summary: '' }
       });
 
-      assert.ok(prompt.includes('- 50.0s-52.5s: Speaker 6: Need a sitrep.'));
+      assert.ok(prompt.includes('- 48.0s-52.5s: Speaker 6: Need a sitrep.'));
       assert.ok(prompt.includes('Trailer-wide context: The trailer stays high-intensity and tense overall.'));
-      assert.ok(prompt.includes('- 50.0s-55.0s: music, detail: Sustained tense orchestral pulse with pounding percussion., mood: tense, intensity: 8'));
-      assert.ok(!prompt.includes('0.0s-140.0s: music'));
-      assert.ok(!prompt.includes('48.0s-52.5s: Speaker 6'));
+      assert.ok(prompt.includes('- 0.0s-140.0s: music, detail: Sustained tense orchestral pulse with pounding percussion., mood: tense, intensity: 8'));
+      assert.ok(prompt.includes('- Chunk window: 50.0s-55.0s'));
     });
 
     await tNested.test('does not truncate trailer-wide or active-chunk music text', () => {

@@ -149,37 +149,16 @@ function buildVideoAttachments(videoContext) {
   return [];
 }
 
-function getPromptWindow(videoContext = {}) {
-  const startTime = Number(videoContext?.startTime);
-  const endTime = Number(videoContext?.endTime);
-
-  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
-    return null;
-  }
-
-  return {
-    startTime,
-    endTime
-  };
-}
-
-function formatSegmentRangeForPrompt(segment = {}, videoContext = {}) {
+function formatSegmentRangeForPrompt(segment = {}) {
   const originalStart = Number(segment?.start);
   const originalEnd = Number(segment?.end);
 
   if (!Number.isFinite(originalStart) || !Number.isFinite(originalEnd)) {
-    return `${segment?.start}s-${segment?.end}s`;
+    const index = Number(segment?.index);
+    return Number.isFinite(index) ? `index ${index}` : 'index ?';
   }
 
-  const window = getPromptWindow(videoContext);
-  if (!window) {
-    return `${originalStart.toFixed(1)}s-${originalEnd.toFixed(1)}s`;
-  }
-
-  const clippedStart = Math.max(window.startTime, originalStart);
-  const clippedEnd = Math.min(window.endTime, originalEnd);
-
-  return `${clippedStart.toFixed(1)}s-${clippedEnd.toFixed(1)}s`;
+  return `${originalStart.toFixed(1)}s-${originalEnd.toFixed(1)}s`;
 }
 
 function normalizePromptText(value) {
@@ -204,7 +183,7 @@ function formatMusicSegmentForPrompt(segment = {}, videoContext = {}) {
 }
 
 function buildPrompt(personaConfig, options) {
-  const { lenses, videoContext, dialogueContext, musicContext, previousState } = options;
+  const { lenses, videoContext, dialogueContext, musicContext, musicVocalsContext, previousState } = options;
   const videoAttachments = buildVideoAttachments(videoContext);
 
   let prompt = '';
@@ -233,7 +212,8 @@ function buildPrompt(personaConfig, options) {
     prompt += `## Previous Summary (continuity only — do not let this override fresh evidence)\n${previousState.summary}\n\n`;
   }
   if (dialogueContext && dialogueContext.segments && dialogueContext.segments.length > 0) {
-    prompt += '## Dialogue\n';
+    prompt += '## Global Dialogue Context (ordered support only)\n';
+    prompt += 'This dialogue context comes from the full asset. It is provided to preserve narrative continuity and speaker awareness.\n';
     dialogueContext.segments.forEach((seg) => {
       prompt += `- ${formatSegmentRangeForPrompt(seg, videoContext)}: ${seg.speaker || 'Speaker'}: ${seg.text}\n`;
     });
@@ -241,14 +221,31 @@ function buildPrompt(personaConfig, options) {
   }
   if ((musicContext && Array.isArray(musicContext.segments) && musicContext.segments.length > 0)
     || (typeof musicContext?.summary === 'string' && musicContext.summary.trim().length > 0)) {
-    prompt += '## Music\n';
+    prompt += '## Global Music Context (support only)\n';
+    prompt += 'This music context summarizes the broader score/cue arc for the full asset.\n';
     if (typeof musicContext?.summary === 'string' && musicContext.summary.trim().length > 0) {
       prompt += `- Trailer-wide context: ${normalizePromptText(musicContext.summary)}\n`;
     }
     if (Array.isArray(musicContext?.segments) && musicContext.segments.length > 0) {
-      prompt += '- Active chunk cues:\n';
+      prompt += '- Relevant global support entries:\n';
       musicContext.segments.forEach((seg) => {
         prompt += `  ${formatMusicSegmentForPrompt(seg, videoContext)}\n`;
+      });
+    }
+    prompt += '\n';
+  }
+  if ((musicVocalsContext && Array.isArray(musicVocalsContext.segments) && musicVocalsContext.segments.length > 0)
+    || (typeof musicVocalsContext?.summary === 'string' && musicVocalsContext.summary.trim().length > 0)) {
+    prompt += '## Global Music-Vocals Context (ordered support only)\n';
+    prompt += 'This music-vocals context comes from the full asset. It is a global ordered support layer for lyric-bearing vocal continuity and repeated hooks.\n';
+    if (typeof musicVocalsContext?.summary === 'string' && musicVocalsContext.summary.trim().length > 0) {
+      prompt += `- Trailer-wide context: ${normalizePromptText(musicVocalsContext.summary)}\n`;
+    }
+    if (Array.isArray(musicVocalsContext?.segments) && musicVocalsContext.segments.length > 0) {
+      prompt += '- Relevant global support entries:\n';
+      musicVocalsContext.segments.forEach((seg) => {
+        const performer = seg?.performer || seg?.speaker || 'Vocal';
+        prompt += `  - ${formatSegmentRangeForPrompt(seg, videoContext)}: ${performer}: ${seg?.text || '[unavailable]'}\n`;
       });
     }
     prompt += '\n';
@@ -267,11 +264,17 @@ function buildPrompt(personaConfig, options) {
   }
 
   prompt += '# INSTRUCTIONS\n\n';
-  prompt += 'Ground your judgment in the attached video chunk first, then use dialogue and music as supporting context.\n';
+  prompt += 'Ground your judgment in the attached video chunk first.\n';
+  prompt += 'Use previous summary only for continuity. Use dialogue, music, and music-vocals context as global support layers from earlier phases.\n';
+  prompt += 'Important: these lane entries are provided as full ordered asset-level context only. They are not authoritative proof that a specific dialogue line, music cue, or lyric belongs inside this chunk just because it appears near this point in the list or carries legacy timing metadata. The attached chunk is the only authoritative evidence for what is present in this chunk.\n';
+  prompt += 'If the chunk clearly supports a line/cue/lyric, you may use the lane context to sharpen interpretation. If the chunk does not support it, do not cite it as chunk evidence.\n';
   prompt += 'Treat previous summary as continuity only. Do not let it override what is visible in this chunk.\n';
-  prompt += 'If the visuals are ambiguous, limited, or absent, say so plainly and do not invent unseen actions or scenes.\n';
-  prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
+  prompt += '- For every lens reasoning field, cite chunk-local visual evidence from the attached video when available (for example: facial expression, body movement, framing/camera emphasis, on-screen action, pacing, or visible text/card changes).\n';
+  prompt += '- If visual evidence is limited, ambiguous, or absent, say that plainly and keep the reasoning conservative instead of inventing unseen action.\n';
+  prompt += '- Do not use dialogue, lyrics, music, or previous-summary continuity as a substitute for chunk-local visual grounding.\n';
+  prompt += '- Do not import dialogue, lyric, or music details from global support context into this chunk unless the attached chunk itself provides enough evidence for them.\n';
   prompt += `${buildEnglishOnlyOutputRuleBlock()}\n`;
+  prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
   prompt += 'The final JSON object must contain exactly the emotion-analysis artifact for this chunk.\n';
   prompt += 'Required shape:\n';
   prompt += '{\n';
@@ -430,7 +433,7 @@ function getCompletionDefaults() {
 }
 
 function buildBasePromptFromInput(input) {
-  const { toolVariables, videoContext, dialogueContext, musicContext, previousState } = input;
+  const { toolVariables, videoContext, dialogueContext, musicContext, musicVocalsContext, previousState } = input;
   const personaConfig = personaLoader.loadPersonaConfig(toolVariables.soulPath, toolVariables.goalPath);
   if (!personaConfig) {
     throw new Error('EmotionLensesTool: failed to load persona configuration');
@@ -441,6 +444,7 @@ function buildBasePromptFromInput(input) {
     videoContext,
     dialogueContext,
     musicContext,
+    musicVocalsContext,
     previousState
   });
 }
@@ -461,7 +465,7 @@ function parseResponse(responseContent, previousState, lenses) {
 }
 
 async function analyze(input) {
-  const { toolVariables, videoContext, dialogueContext, musicContext, previousState, config, provider, adapter, apiKey } = input;
+  const { toolVariables, videoContext, dialogueContext, musicContext, musicVocalsContext, previousState, config, provider, adapter, apiKey } = input;
 
   const validation = validateVariables(toolVariables);
   if (!validation.valid) {
@@ -473,6 +477,7 @@ async function analyze(input) {
     videoContext,
     dialogueContext,
     musicContext,
+    musicVocalsContext,
     previousState
   });
 
