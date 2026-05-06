@@ -212,8 +212,8 @@ function buildPrompt(personaConfig, options) {
     prompt += `## Previous Summary (continuity only — do not let this override fresh evidence)\n${previousState.summary}\n\n`;
   }
   if (dialogueContext && dialogueContext.segments && dialogueContext.segments.length > 0) {
-    prompt += '## Global Dialogue Context (ordered support only)\n';
-    prompt += 'This dialogue context comes from the full asset. It is provided to preserve narrative continuity and speaker awareness.\n';
+    prompt += '## Timestamp-Grounded Dialogue Context\n';
+    prompt += 'This dialogue context is filtered by timestamp overlap and is provided to preserve narrative continuity and speaker awareness.\n';
     dialogueContext.segments.forEach((seg) => {
       prompt += `- ${formatSegmentRangeForPrompt(seg, videoContext)}: ${seg.speaker || 'Speaker'}: ${seg.text}\n`;
     });
