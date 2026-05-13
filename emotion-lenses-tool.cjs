@@ -166,6 +166,25 @@ function normalizePromptText(value) {
   return value.trim().replace(/\s+/g, ' ');
 }
 
+function hasPreviousContinuityState(previousState = {}) {
+  if (!previousState || typeof previousState !== 'object') return false;
+  return Boolean(
+    normalizePromptText(previousState.summary)
+    || normalizePromptText(previousState.thought)
+    || normalizePromptText(previousState.continuationThought)
+    || normalizePromptText(previousState.dominantEmotion)
+    || normalizePromptText(previousState.scrollRisk)
+    || Number.isFinite(previousState.startTime)
+    || Number.isFinite(previousState.endTime)
+    || Number.isInteger(previousState.chunkIndex)
+  );
+}
+
+function formatAbsoluteWindowForPrompt(startTime, endTime) {
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) return '';
+  return `${startTime.toFixed(1)}s-${endTime.toFixed(1)}s`;
+}
+
 function formatMusicSegmentForPrompt(segment = {}, videoContext = {}) {
   const details = [segment?.type || 'music'];
 
@@ -208,8 +227,31 @@ function buildPrompt(personaConfig, options) {
   });
 
   prompt += '# CONTEXT\n\n';
-  if (previousState && previousState.summary) {
-    prompt += `## Previous Summary (continuity only — do not let this override fresh evidence)\n${previousState.summary}\n\n`;
+  if (hasPreviousContinuityState(previousState)) {
+    prompt += '## Viewer Continuity State (support only — do not override fresh chunk evidence)\n';
+    if (normalizePromptText(previousState.summary)) {
+      prompt += `- Previous summary: ${normalizePromptText(previousState.summary)}\n`;
+    }
+    if (normalizePromptText(previousState.thought)) {
+      prompt += `- Previous thought: ${normalizePromptText(previousState.thought)}\n`;
+    }
+    if (normalizePromptText(previousState.continuationThought)) {
+      prompt += `- Previous continuation thought: ${normalizePromptText(previousState.continuationThought)}\n`;
+    }
+    if (normalizePromptText(previousState.dominantEmotion)) {
+      prompt += `- Previous dominant emotion: ${normalizePromptText(previousState.dominantEmotion)}\n`;
+    }
+    if (normalizePromptText(previousState.scrollRisk)) {
+      prompt += `- Previous scroll risk: ${normalizePromptText(previousState.scrollRisk)}\n`;
+    }
+    const priorWindow = formatAbsoluteWindowForPrompt(previousState.startTime, previousState.endTime);
+    if (priorWindow) {
+      prompt += `- Prior chunk window: ${priorWindow}\n`;
+    }
+    if (Number.isInteger(previousState.chunkIndex)) {
+      prompt += `- Prior chunk index: ${previousState.chunkIndex}\n`;
+    }
+    prompt += '\n';
   }
   if (dialogueContext && dialogueContext.segments && dialogueContext.segments.length > 0) {
     prompt += '## Timestamp-Grounded Dialogue Context\n';
@@ -265,23 +307,25 @@ function buildPrompt(personaConfig, options) {
 
   prompt += '# INSTRUCTIONS\n\n';
   prompt += 'Ground your judgment in the attached video chunk first.\n';
-  prompt += 'Use previous summary only for continuity. Use dialogue, music, and music-vocals context as global support layers from earlier phases.\n';
+  prompt += 'Treat thought as the viewer\'s current running internal monologue while watching one continuous trailer from start to finish. The attached chunk is the newest slice of evidence in that ongoing watch experience, not a brand-new standalone clip.\n';
+  prompt += 'Use viewer continuity state, dialogue, music, and music-vocals context as support layers only. Do not let them override what is visible in this chunk.\n';
   prompt += 'Important: these lane entries are provided as full ordered asset-level context only. They are not authoritative proof that a specific dialogue line, music cue, or lyric belongs inside this chunk just because it appears near this point in the list or carries legacy timing metadata. The attached chunk is the only authoritative evidence for what is present in this chunk.\n';
   prompt += 'If the chunk clearly supports a line/cue/lyric, you may use the lane context to sharpen interpretation. If the chunk does not support it, do not cite it as chunk evidence.\n';
-  prompt += 'Treat previous summary as continuity only. Do not let it override what is visible in this chunk.\n';
+  prompt += 'When the attached chunk clearly includes a speaking beat, dialogue reveal, or visibly dialogue-driven moment, thought may react naturally to that line or beat. You may use timestamp-grounded dialogue context to sharpen wording only when the chunk itself supports it.\n';
   prompt += '- For every lens reasoning field, cite chunk-local visual evidence from the attached video when available (for example: facial expression, body movement, framing/camera emphasis, on-screen action, pacing, or visible text/card changes).\n';
   prompt += '- If visual evidence is limited, ambiguous, or absent, say that plainly and keep the reasoning conservative instead of inventing unseen action.\n';
-  prompt += '- Do not use dialogue, lyrics, music, or previous-summary continuity as a substitute for chunk-local visual grounding.\n';
+  prompt += '- Do not use dialogue, lyrics, music, or viewer continuity state as a substitute for chunk-local visual grounding.\n';
   prompt += '- Do not import dialogue, lyric, or music details from global support context into this chunk unless the attached chunk itself provides enough evidence for them.\n';
+  prompt += '- Do not narrate thought or continuationThought with local-relative timestamps or beat counters such as 0.0s, 2.0s, 5.0s, or phrases like at the start of this chunk. If you need temporal language, use natural full-watch phrasing like right away, still, now, by this point, this late in the trailer, or at the end card.\n';
   prompt += `${buildEnglishOnlyOutputRuleBlock()}\n`;
   prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
   prompt += 'The final JSON object must contain exactly the emotion-analysis artifact for this chunk.\n';
-  prompt += 'Keep summary neutral and evidence-grounded. Use thought for persona-voiced internal reaction to this chunk. continuationThought is optional and should appear only when it adds real sequence continuity beyond thought. personaMeta is optional and, if used, may only include scrollRisk.\n';
+  prompt += 'Keep summary neutral and evidence-grounded. Use thought for persona-voiced internal monologue during the continuous full-trailer watch experience, shaped by the current chunk as the newest evidence. continuationThought is optional and should appear only when it adds real forward momentum, escalation, or retention intent beyond thought. personaMeta is optional and, if used, may only include scrollRisk.\n';
   prompt += 'Required shape:\n';
   prompt += '{\n';
   prompt += '  "summary": "Brief summary of this chunk (1-2 sentences)",\n';
-  prompt += '  "thought": "Persona-voiced internal monologue for this chunk.",\n';
-  prompt += '  "continuationThought": "Optional follow-on reaction that carries momentum from the prior chunk.",\n';
+  prompt += '  "thought": "Persona-voiced running internal monologue for the ongoing full-trailer watch experience.",\n';
+  prompt += '  "continuationThought": "Optional follow-on reaction that adds forward momentum beyond the main thought.",\n';
   prompt += '  "emotions": {\n';
   lenses.forEach((lens, index) => {
     prompt += `    "${lens}": { "score": <1-10>, "reasoning": "explanation" }${index < lenses.length - 1 ? ',' : ''}\n`;

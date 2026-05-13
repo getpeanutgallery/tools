@@ -128,7 +128,16 @@ test('Emotion Lenses Tool', async (t) => {
             intensity: 6
           }]
         },
-        previousState: { summary: 'Previous chunk summary' }
+        previousState: {
+          summary: 'Previous chunk summary',
+          thought: 'That opener is finally doing real work.',
+          continuationThought: 'Do not waste this momentum.',
+          dominantEmotion: 'patience',
+          scrollRisk: 'medium',
+          chunkIndex: 3,
+          startTime: 24,
+          endTime: 32
+        }
       };
       const prompt = emotionLensesTool.buildPrompt(personaConfig, options);
       assert.ok(prompt.includes('# PERSONA'));
@@ -139,18 +148,28 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(prompt.includes('Ground your judgment in the attached video chunk first'));
       assert.ok(prompt.includes('Attached video chunk: video/mp4 (base64)'));
       assert.ok(prompt.includes('Return JSON only.'));
-      assert.ok(prompt.includes('"thought": "Persona-voiced internal monologue for this chunk."'));
+      assert.ok(prompt.includes('"thought": "Persona-voiced running internal monologue for the ongoing full-trailer watch experience."'));
       assert.ok(prompt.includes('continuationThought is optional'));
       assert.ok(prompt.includes('If personaMeta is present, it may only contain scrollRisk.'));
       assert.ok(prompt.includes('Allowed values for dominant_emotion: patience | boredom.'));
       assert.ok(prompt.includes('dominant_emotion must match one of the configured lens names'));
-      assert.ok(prompt.includes('Previous chunk summary'));
+      assert.ok(prompt.includes('Viewer Continuity State'));
+      assert.ok(prompt.includes('Previous summary: Previous chunk summary'));
+      assert.ok(prompt.includes('Previous thought: That opener is finally doing real work.'));
+      assert.ok(prompt.includes('Previous continuation thought: Do not waste this momentum.'));
+      assert.ok(prompt.includes('Previous dominant emotion: patience'));
+      assert.ok(prompt.includes('Previous scroll risk: medium'));
+      assert.ok(prompt.includes('Prior chunk window: 24.0s-32.0s'));
+      assert.ok(prompt.includes('Prior chunk index: 3'));
       assert.ok(prompt.includes('Speaker 1'));
       assert.ok(prompt.includes('Trailer-wide context: Trailer-wide music stays tense and cinematic.'));
       assert.ok(prompt.includes('- Relevant global support entries:'));
       assert.ok(prompt.includes('detail: Aggressive percussion hits under the opening threat.'));
       assert.ok(prompt.includes('cite chunk-local visual evidence from the attached video when available'));
-      assert.ok(prompt.includes('Do not use dialogue, lyrics, music, or previous-summary continuity as a substitute for chunk-local visual grounding.'));
+      assert.ok(prompt.includes('Do not use dialogue, lyrics, music, or viewer continuity state as a substitute for chunk-local visual grounding.'));
+      assert.ok(prompt.includes('Treat thought as the viewer\'s current running internal monologue while watching one continuous trailer from start to finish.'));
+      assert.ok(prompt.includes('When the attached chunk clearly includes a speaking beat, dialogue reveal, or visibly dialogue-driven moment, thought may react naturally to that line or beat.'));
+      assert.ok(prompt.includes('Do not narrate thought or continuationThought with local-relative timestamps or beat counters such as 0.0s, 2.0s, 5.0s'));
       assert.ok(prompt.includes('tense'));
     });
 
@@ -327,6 +346,61 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(!result.valid);
       assert.ok(result.summary.includes('continuationThought'));
       assert.ok(result.summary.includes('personaMeta'));
+    });
+
+    await tNested.test('rejects local-relative timestamp phrasing in thought fields while allowing natural continuity language', () => {
+      const thoughtResult = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Timestamped payload.',
+          thought: '0.0s in and this already feels louder.',
+          emotions: {
+            patience: { score: 4, reasoning: 'The pacing jerks around.' },
+            boredom: { score: 3, reasoning: 'The beat still changes.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.6
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
+      const continuationResult = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Timestamped continuation payload.',
+          thought: 'Still holding together.',
+          continuationThought: '2.0s later and it is still flexing.',
+          emotions: {
+            patience: { score: 5, reasoning: 'The pacing stays readable.' },
+            boredom: { score: 2, reasoning: 'The cut keeps moving.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.65
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
+      const naturalLanguageResult = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Natural continuity payload.',
+          thought: 'Still with me by this point.',
+          continuationThought: 'Now give me the payoff.',
+          emotions: {
+            patience: { score: 7, reasoning: 'The pacing stays composed.' },
+            boredom: { score: 2, reasoning: 'The reveal keeps building.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.86
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
+      assert.ok(!thoughtResult.valid);
+      assert.ok(thoughtResult.summary.includes('$.thought'));
+      assert.ok(!continuationResult.valid);
+      assert.ok(continuationResult.summary.includes('$.continuationThought'));
+      assert.ok(naturalLanguageResult.valid);
     });
   });
 
