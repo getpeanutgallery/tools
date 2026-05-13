@@ -276,19 +276,26 @@ function buildPrompt(personaConfig, options) {
   prompt += `${buildEnglishOnlyOutputRuleBlock()}\n`;
   prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
   prompt += 'The final JSON object must contain exactly the emotion-analysis artifact for this chunk.\n';
+  prompt += 'Keep summary neutral and evidence-grounded. Use thought for persona-voiced internal reaction to this chunk. continuationThought is optional and should appear only when it adds real sequence continuity beyond thought. personaMeta is optional and, if used, may only include scrollRisk.\n';
   prompt += 'Required shape:\n';
   prompt += '{\n';
   prompt += '  "summary": "Brief summary of this chunk (1-2 sentences)",\n';
+  prompt += '  "thought": "Persona-voiced internal monologue for this chunk.",\n';
+  prompt += '  "continuationThought": "Optional follow-on reaction that carries momentum from the prior chunk.",\n';
   prompt += '  "emotions": {\n';
   lenses.forEach((lens, index) => {
     prompt += `    "${lens}": { "score": <1-10>, "reasoning": "explanation" }${index < lenses.length - 1 ? ',' : ''}\n`;
   });
   prompt += '  },\n';
   prompt += '  "dominant_emotion": "patience",\n';
-  prompt += '  "confidence": <0.0-1.0>\n';
+  prompt += '  "confidence": <0.0-1.0>,\n';
+  prompt += '  "personaMeta": {\n';
+  prompt += '    "scrollRisk": "low|medium|high|SCROLLING"\n';
+  prompt += '  }\n';
   prompt += '}\n';
   prompt += `Allowed values for dominant_emotion: ${lenses.join(' | ')}.\n`;
   prompt += 'dominant_emotion must match one of the configured lens names.\n';
+  prompt += 'If personaMeta is present, it may only contain scrollRisk.\n';
 
   return prompt;
 }
@@ -372,12 +379,17 @@ function buildEmotionAnalysisValidatorToolContract({ lenses = [] } = {}) {
     name: EMOTION_ANALYSIS_TOOL_NAME,
     argumentKey: 'emotionAnalysis',
     description: 'Validate a Phase 2 video chunk emotion-analysis JSON candidate against the required local schema before final submission.',
-    candidateDescription: 'Candidate emotion-analysis JSON with summary, dominant_emotion, confidence, and one emotions entry per configured lens.',
+    candidateDescription: 'Candidate emotion-analysis JSON with summary, required thought, optional continuationThought, optional bounded personaMeta, dominant_emotion, confidence, and one emotions entry per configured lens.',
     example: {
       summary: 'The speaker stays calm and measured while tension slowly rises.',
+      thought: 'Okay, this finally feels like it is building toward something instead of stalling out.',
+      continuationThought: 'If the next beat actually lands, I am still in.',
       emotions: exampleEmotions,
       dominant_emotion: lenses[0] || 'patience',
-      confidence: 0.82
+      confidence: 0.82,
+      personaMeta: {
+        scrollRisk: 'medium'
+      }
     }
   });
 }
@@ -577,7 +589,9 @@ async function executeEmotionAnalysisToolLoop({
     artifactLabel: 'emotion analysis',
     finalArtifactDescription: 'The final artifact must be the emotion-analysis JSON object for this video chunk.',
     finalArtifactRules: [
-      'Include summary, emotions, dominant_emotion, and confidence.',
+      'Include summary, required thought, emotions, dominant_emotion, and confidence.',
+      'continuationThought is optional and should appear only when it adds real sequence continuity.',
+      'personaMeta is optional and may only contain scrollRisk when present.',
       'Provide exactly one emotions entry per configured lens.',
       'Each emotions.<lens>.score must be between 1 and 10.',
       'dominant_emotion must match one of the configured lens names.',

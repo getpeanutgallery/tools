@@ -18,6 +18,7 @@ const mockAIProvider = {
       return {
         content: JSON.stringify({
           summary: 'Test chunk analysis',
+          thought: 'That lands better than I expected.',
           emotions: {
             patience: { score: 7, reasoning: 'Test reasoning' },
             boredom: { score: 3, reasoning: 'Test reasoning' },
@@ -138,6 +139,9 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(prompt.includes('Ground your judgment in the attached video chunk first'));
       assert.ok(prompt.includes('Attached video chunk: video/mp4 (base64)'));
       assert.ok(prompt.includes('Return JSON only.'));
+      assert.ok(prompt.includes('"thought": "Persona-voiced internal monologue for this chunk."'));
+      assert.ok(prompt.includes('continuationThought is optional'));
+      assert.ok(prompt.includes('If personaMeta is present, it may only contain scrollRisk.'));
       assert.ok(prompt.includes('Allowed values for dominant_emotion: patience | boredom.'));
       assert.ok(prompt.includes('dominant_emotion must match one of the configured lens names'));
       assert.ok(prompt.includes('Previous chunk summary'));
@@ -251,6 +255,9 @@ test('Emotion Lenses Tool', async (t) => {
       assert.strictEqual(contract.name, 'validate_emotion_analysis_json');
       assert.strictEqual(contract.argumentKey, 'emotionAnalysis');
       assert.strictEqual(contract.canonicalEnvelope.tool, 'validate_emotion_analysis_json');
+      assert.ok(contract.canonicalEnvelope.emotionAnalysis.thought);
+      assert.ok(contract.canonicalEnvelope.emotionAnalysis.continuationThought);
+      assert.strictEqual(contract.canonicalEnvelope.emotionAnalysis.personaMeta.scrollRisk, 'medium');
       assert.ok(contract.canonicalEnvelope.emotionAnalysis.emotions.patience);
       assert.ok(contract.canonicalEnvelope.emotionAnalysis.emotions.boredom);
     });
@@ -259,12 +266,15 @@ test('Emotion Lenses Tool', async (t) => {
       const result = emotionLensesTool.executeEmotionAnalysisValidatorTool({
         emotionAnalysis: {
           summary: 'Steady and focused.',
+          thought: 'Okay, this feels composed instead of messy.',
+          continuationThought: 'Keep this rhythm and I stay with it.',
           emotions: {
             patience: { score: 8, reasoning: 'Measured delivery.' },
             boredom: { score: 2, reasoning: 'Momentum stays intact.' }
           },
           dominant_emotion: 'patience',
-          confidence: 0.9
+          confidence: 0.9,
+          personaMeta: { scrollRisk: 'low' }
         }
       }, {
         lenses: ['patience', 'boredom']
@@ -272,12 +282,16 @@ test('Emotion Lenses Tool', async (t) => {
 
       assert.ok(result.valid);
       assert.strictEqual(result.normalizedValue.summary, 'Steady and focused.');
+      assert.strictEqual(result.normalizedValue.thought, 'Okay, this feels composed instead of messy.');
+      assert.strictEqual(result.normalizedValue.continuationThought, 'Keep this rhythm and I stay with it.');
+      assert.strictEqual(result.normalizedValue.personaMeta.scrollRisk, 'low');
     });
 
     await tNested.test('rejects missing required lens entries', () => {
       const result = emotionLensesTool.executeEmotionAnalysisValidatorTool({
         emotionAnalysis: {
           summary: 'Incomplete payload.',
+          thought: 'This is missing required fields.',
           emotions: {
             patience: { score: 8, reasoning: 'Present.' }
           },
@@ -291,12 +305,36 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(!result.valid);
       assert.ok(result.summary.includes('boredom'));
     });
+
+    await tNested.test('rejects redundant continuationThought and unknown personaMeta keys', () => {
+      const result = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Redundant payload.',
+          thought: 'This beat is finally waking up.',
+          continuationThought: 'This beat is finally waking up.',
+          emotions: {
+            patience: { score: 6, reasoning: 'The pacing steadies.' },
+            boredom: { score: 3, reasoning: 'The visual pattern keeps changing.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.7,
+          personaMeta: { mood: 'curious' }
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
+      assert.ok(!result.valid);
+      assert.ok(result.summary.includes('continuationThought'));
+      assert.ok(result.summary.includes('personaMeta'));
+    });
   });
 
   await t.test('parseResponse', async (tNested) => {
     await tNested.test('parses valid JSON response', () => {
       const responseContent = JSON.stringify({
         summary: 'Test summary',
+        thought: 'Nice, this actually has some momentum.',
         emotions: {
           patience: { score: 8, reasoning: 'Good pacing' },
           boredom: { score: 2, reasoning: 'Very engaging' }
@@ -306,6 +344,7 @@ test('Emotion Lenses Tool', async (t) => {
       });
       const state = emotionLensesTool.parseResponse(responseContent, { summary: 'Previous summary' }, ['patience', 'boredom']);
       assert.strictEqual(state.summary, 'Test summary');
+      assert.strictEqual(state.thought, 'Nice, this actually has some momentum.');
       assert.strictEqual(state.emotions.patience.score, 8);
       assert.strictEqual(state.emotions.boredom.score, 2);
       assert.strictEqual(state.dominant_emotion, 'patience');
@@ -451,6 +490,7 @@ test('Emotion Lenses Tool', async (t) => {
         complete: async () => ({
           content: JSON.stringify({
             summary: 'Broken',
+            thought: 'This is invalid output.',
             emotions: { patience: { score: 20, reasoning: 'Too high' } },
             dominant_emotion: 'panic',
             confidence: 5
@@ -486,6 +526,7 @@ test('Emotion Lenses Tool', async (t) => {
           tool: 'validate_emotion_analysis_json',
           emotionAnalysis: {
             summary: 'First draft',
+            thought: 'That opener finally gets moving.',
             emotions: {
               patience: { score: 8, reasoning: 'Calm pacing' },
               boredom: { score: 2, reasoning: 'Engaging enough' }
@@ -532,6 +573,7 @@ test('Emotion Lenses Tool', async (t) => {
       assert.strictEqual(providerCalls, 1);
       assert.deepStrictEqual(result.parsed, {
         summary: 'First draft',
+        thought: 'That opener finally gets moving.',
         emotions: {
           patience: { score: 8, reasoning: 'Calm pacing' },
           boredom: { score: 2, reasoning: 'Engaging enough' }
@@ -576,6 +618,7 @@ test('Emotion Lenses Tool', async (t) => {
           tool: 'validate_emotion_analysis_json',
           emotionAnalysis: {
             summary: 'Broken draft',
+            thought: 'This still needs another pass.',
             emotions: {
               patience: { score: 8, reasoning: 'Calm pacing' }
             },
@@ -587,6 +630,7 @@ test('Emotion Lenses Tool', async (t) => {
           tool: 'validate_emotion_analysis_json',
           emotionAnalysis: {
             summary: 'Repaired draft',
+            thought: 'Okay, now the repair actually works.',
             emotions: {
               patience: { score: 8, reasoning: 'Calm pacing' },
               boredom: { score: 2, reasoning: 'Engaging enough' }
