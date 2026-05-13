@@ -169,7 +169,7 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(prompt.includes('Do not use dialogue, lyrics, music, or viewer continuity state as a substitute for chunk-local visual grounding.'));
       assert.ok(prompt.includes('Treat thought as the viewer\'s current running internal monologue while watching one continuous trailer from start to finish.'));
       assert.ok(prompt.includes('When the attached chunk clearly includes a speaking beat, dialogue reveal, or visibly dialogue-driven moment, thought may react naturally to that line or beat.'));
-      assert.ok(prompt.includes('Do not narrate thought or continuationThought with local-relative timestamps or beat counters such as 0.0s, 2.0s, 5.0s'));
+      assert.ok(prompt.includes('Do not narrate thought or continuationThought with local-relative timestamps, beat counters, or local countdown phrasing such as 0.0s, 2.0s, 5.0s, next 5 seconds, in the next second, next few seconds'));
       assert.ok(prompt.includes('tense'));
     });
 
@@ -348,7 +348,7 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(result.summary.includes('personaMeta'));
     });
 
-    await tNested.test('rejects local-relative timestamp phrasing in thought fields while allowing natural continuity language', () => {
+    await tNested.test('rejects local-relative timestamp and countdown phrasing in thought fields while allowing natural continuity language', () => {
       const thoughtResult = emotionLensesTool.executeEmotionAnalysisValidatorTool({
         emotionAnalysis: {
           summary: 'Timestamped payload.',
@@ -380,6 +380,38 @@ test('Emotion Lenses Tool', async (t) => {
         lenses: ['patience', 'boredom']
       });
 
+      const countdownResult = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Countdown payload.',
+          thought: 'Still holding together.',
+          continuationThought: 'If the next 5 seconds hit, I stay in.',
+          emotions: {
+            patience: { score: 5, reasoning: 'The pacing stays readable.' },
+            boredom: { score: 2, reasoning: 'The cut keeps moving.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.67
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
+      const fewSecondsResult = emotionLensesTool.executeEmotionAnalysisValidatorTool({
+        emotionAnalysis: {
+          summary: 'Loose countdown payload.',
+          thought: 'The energy is finally climbing.',
+          continuationThought: 'Next few seconds decide whether this actually pays off.',
+          emotions: {
+            patience: { score: 6, reasoning: 'The build keeps moving.' },
+            boredom: { score: 2, reasoning: 'The beat still evolves.' }
+          },
+          dominant_emotion: 'patience',
+          confidence: 0.7
+        }
+      }, {
+        lenses: ['patience', 'boredom']
+      });
+
       const naturalLanguageResult = emotionLensesTool.executeEmotionAnalysisValidatorTool({
         emotionAnalysis: {
           summary: 'Natural continuity payload.',
@@ -400,6 +432,10 @@ test('Emotion Lenses Tool', async (t) => {
       assert.ok(thoughtResult.summary.includes('$.thought'));
       assert.ok(!continuationResult.valid);
       assert.ok(continuationResult.summary.includes('$.continuationThought'));
+      assert.ok(!countdownResult.valid);
+      assert.ok(countdownResult.summary.includes('$.continuationThought'));
+      assert.ok(!fewSecondsResult.valid);
+      assert.ok(fewSecondsResult.summary.includes('$.continuationThought'));
       assert.ok(naturalLanguageResult.valid);
     });
   });

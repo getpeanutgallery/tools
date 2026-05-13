@@ -316,7 +316,7 @@ function buildPrompt(personaConfig, options) {
   prompt += '- If visual evidence is limited, ambiguous, or absent, say that plainly and keep the reasoning conservative instead of inventing unseen action.\n';
   prompt += '- Do not use dialogue, lyrics, music, or viewer continuity state as a substitute for chunk-local visual grounding.\n';
   prompt += '- Do not import dialogue, lyric, or music details from global support context into this chunk unless the attached chunk itself provides enough evidence for them.\n';
-  prompt += '- Do not narrate thought or continuationThought with local-relative timestamps or beat counters such as 0.0s, 2.0s, 5.0s, or phrases like at the start of this chunk. If you need temporal language, use natural full-watch phrasing like right away, still, now, by this point, this late in the trailer, or at the end card.\n';
+  prompt += '- Do not narrate thought or continuationThought with local-relative timestamps, beat counters, or local countdown phrasing such as 0.0s, 2.0s, 5.0s, next 5 seconds, in the next second, next few seconds, or phrases like at the start of this chunk. If you need temporal language, use natural full-watch phrasing like right away, still, now, by this point, this late in the trailer, or at the end card.\n';
   prompt += `${buildEnglishOnlyOutputRuleBlock()}\n`;
   prompt += 'Return JSON only. Do not use markdown fences, commentary, or any wrapper outside a single JSON object.\n';
   prompt += 'The final JSON object must contain exactly the emotion-analysis artifact for this chunk.\n';
